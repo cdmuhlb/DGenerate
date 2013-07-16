@@ -4,6 +4,7 @@ import java.io._
 
 import akka.actor.{Actor, ActorLogging, ActorRef, Props}
 import akka.actor.{Address, Deploy}
+import akka.cluster.Cluster
 import akka.remote.RemoteScope
 import scala.collection.mutable
 import breeze.linalg.DenseVector
@@ -15,15 +16,15 @@ import edu.cornell.cdm89.scalaspec.pde.LaxFriedrichsFlux.BoundaryValues
 import edu.cornell.cdm89.scalaspec.pde.FluxConservativePde
 import edu.cornell.cdm89.scalaspec.spectral.GllBasis
 
-class DomainSubset(dom: DomainInfo, pde: FluxConservativePde) extends Actor
-    with ActorLogging {
+class DomainSubset(dom: DomainInfo, pde: FluxConservativePde,
+    controller: ActorRef) extends Actor with ActorLogging {
   val width = (dom.xR - dom.xL) / dom.nElems
   val basis = GllBasis(dom.order)
   val elements = mutable.Map.empty[Int, ActorRef]
   
   // HACK
-  val elemsOnNode1 = 999
-  val node2 = Address("akka.tcp", "Harvest", "127.0.0.1", 2552)
+  val elemsOnNode1 = 4
+  val nodeNum = if (Cluster(context.system).selfAddress.port == Some(2551)) 1 else 2
 
   // TODO: Inject BCs
   val nVars = 3
@@ -43,41 +44,44 @@ class DomainSubset(dom: DomainInfo, pde: FluxConservativePde) extends Actor
     
   override def preStart = {
     // Create boundaries
-    context.actorOf(Props(classOf[ExternalBoundaryActor], dom.xL, leftBc), "boundary0")
-    for (i <- 1 to dom.nElems-1) {
-      val x = dom.xL + i*width
-      if (i < elemsOnNode1) {
+    if (nodeNum == 1) {
+      context.actorOf(Props(classOf[ExternalBoundaryActor], dom.xL, leftBc), "boundary0")
+      for (i <- 1 until elemsOnNode1.min(dom.nElems-1)) {
+        val x = dom.xL + i*width
         context.actorOf(Props(classOf[InternalBoundaryActor], x), s"boundary$i")
-      } else {
-        context.actorOf(Props(classOf[InternalBoundaryActor], x).withDeploy(
-            Deploy(scope = RemoteScope(node2))), s"boundary$i")
+      }
+      if (dom.nElems < elemsOnNode1) {
+        context.actorOf(Props(classOf[ExternalBoundaryActor], dom.xR, rightBc), s"boundary${dom.nElems}")
+      }
+    } else {
+      for (i <- elemsOnNode1 to dom.nElems-1) {
+        val x = dom.xL + i*width
+        context.actorOf(Props(classOf[InternalBoundaryActor], x), s"boundary$i")
+      }
+      if (dom.nElems >= elemsOnNode1) {
+        context.actorOf(Props(classOf[ExternalBoundaryActor], dom.xR, rightBc), s"boundary${dom.nElems}")
       }
     }
-    if (dom.nElems < elemsOnNode1) {
-      context.actorOf(Props(classOf[ExternalBoundaryActor], dom.xR, rightBc), s"boundary${dom.nElems}")
-    } else {
-      context.actorOf(Props(classOf[ExternalBoundaryActor], dom.xR, rightBc).withDeploy(
-            Deploy(scope = RemoteScope(node2))), s"boundary${dom.nElems}")
-    }
+    
+    Thread.sleep(2000)
     
     // Create elements
     for (i <- 0 until dom.nElems) {
       val x = dom.xL + i*width
       val map = new AffineMap(x, x+width)
-      val elem = if (i < elemsOnNode1) {
-        context.actorOf(Props(classOf[GllElement], basis, map, pde), s"interval$i")
-      } else {
-        context.actorOf(Props(classOf[GllElement], basis, map, pde).withDeploy(
-            Deploy(scope = RemoteScope(node2))), s"interval$i")
+      if (((nodeNum == 1) && (i < elemsOnNode1)) ||
+          ((nodeNum == 2) && (i >= elemsOnNode1))) {
+        val elem = context.actorOf(Props(classOf[GllElement], basis, map, pde), s"interval$i")
+        elements(i) = elem
       }
-      elements(i) = elem
     }
+    self ! 'Initialize
   }
   
   def receive = {
     case 'Initialize =>
-      sender ! 'Initializing
-      context.become(initializing(sender, emptyResponses))
+      controller ! 'DomainInitializing
+      context.become(initializing(controller, emptyResponses))
   }
   
   def initializing(controller: ActorRef, responses: mutable.Map[ActorRef, Boolean]): Receive = {
@@ -91,9 +95,11 @@ class DomainSubset(dom: DomainInfo, pde: FluxConservativePde) extends Actor
   
   def ready: Receive = {
     case step: GllElement.StepTo =>
+      log.info("Stepping")
       elements.values foreach { _ ! step }
       context.become(stepping(sender, emptyResponses))
     case interp: GllElement.Interpolate =>
+      log.info("Interpolating")
       elements.values foreach { _ ! interp }
       context.become(observing(sender, emptyResponses))
   }

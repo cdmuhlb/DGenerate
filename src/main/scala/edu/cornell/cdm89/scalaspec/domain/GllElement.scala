@@ -2,6 +2,7 @@ package edu.cornell.cdm89.scalaspec.domain
 
 import akka.actor.{Actor, ActorLogging, ActorRef, Props}
 import akka.actor.{Address, ActorIdentity, Identify}
+import akka.cluster.Cluster
 import breeze.linalg.DenseVector
 
 import edu.cornell.cdm89.scalaspec.spectral.GllBasis
@@ -71,17 +72,18 @@ class GllElement(basis: GllBasis, map: AffineMap,
     //context.actorSelection(s"../boundary$index") ! Identify('Left)
     //context.actorSelection(s"../boundary${index+1}") ! Identify('Right)
     
-    val elemsOnNode1 = 999
-    val node2 = Address("akka.tcp", "Harvest", "127.0.0.1", 2552)
+    // HACK
+    val elemsOnNode1 = 4
+    val nodeNum = if (Cluster(context.system).selfAddress.port == Some(2551)) 1 else 2
+    // Using actorSelection(Address) seems to produce deadLetters instead of None
+    //val node2 = Address("akka.tcp", "Harvest", "127.0.0.1", 2552)
+    val node2 = "akka.tcp://Harvest@127.0.0.1:2552/"
+
     context.actorSelection(s"../boundary$index") ! Identify('Left)
-    if (index < elemsOnNode1) {
-      if (index + 1 < elemsOnNode1) {
-        context.actorSelection(s"../boundary${index+1}") ! Identify('Right)
-      } else {
-        context.actorSelection(node2 + s"user/dommain0/boundary${index+1}") ! Identify('Right)
-      }
-    } else {
+    if (((nodeNum == 1) && (index+1 < elemsOnNode1)) || (nodeNum == 2)) {
       context.actorSelection(s"../boundary${index+1}") ! Identify('Right)
+    } else {
+      context.actorSelection(node2 + s"user/domain0/boundary${index+1}") ! Identify('Right)
     }
   }
   
@@ -94,6 +96,8 @@ class GllElement(basis: GllBasis, map: AffineMap,
       tracker.haveLeft(actor)
     case ActorIdentity('Right, Some(actor)) =>
       tracker.haveRight(actor)
+    case ActorIdentity(lr, None) =>
+      log.error(s"No actor for boundary at $lr")
     case InitialData(state) =>
       tracker.haveId(state)
     case 'GetCoords =>

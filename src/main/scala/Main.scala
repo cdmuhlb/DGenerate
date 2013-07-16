@@ -1,8 +1,9 @@
 import akka.actor.{ActorSystem, Props}
 import akka.actor.Inbox
 import akka.cluster.Cluster
-import com.typesafe.config.ConfigFactory
+import akka.routing.FromConfig
 import scala.concurrent.duration._
+import com.typesafe.config.ConfigFactory
 
 import edu.cornell.cdm89.scalaspec.domain.{DomainInfo, DomainSubset, GllElement}
 import edu.cornell.cdm89.scalaspec.ode.OdeState
@@ -23,57 +24,69 @@ object Main extends App {
     val inbox = Inbox.create(system)
 
     val order = 8
-    val nElems = 100
+    val nElems = 8
     val t0 = 0.0
     val dt = 0.001
-    val nSteps = 500
+    val nSteps = 1000
     val obsFreq = 10
   
     val domInfo = DomainInfo(0.0, 10.0, order, nElems)
     val domain = system.actorOf(Props(classOf[DomainSubset], domInfo,
-        //new ScalarAdvectionEquation(2.0*math.Pi)), "domain0")
-        new ScalarWaveEquation), "domain0")
-
-    inbox.send(domain, 'Initialize)
+        //new ScalarAdvectionEquation(2.0*math.Pi)),
+        new ScalarWaveEquation,
+        inbox.getRef), "domain0")
     inbox.receive(10.seconds) match {
-      case 'Initializing =>
+      // Don't send ID until domain is ready for its actors' messages
+      case 'DomainInitializing =>
     }
+    val domRouter = system.actorOf(Props.empty.withRouter(FromConfig), "domRouter")
     
     //val idActor = system.actorOf(Props[SineWaveInitialData], "idProvider")
     val idActor = system.actorOf(Props(classOf[TrianglePulseInitialData], 5.0, 0.5, 1.0), "idProvider")
     inbox.receive(10.seconds) match {
-      case 'AllReady => //println("All ready!")
+      case 'AllReady => println("All ready!")
       case msg =>
         println("Unexpected message: " + msg)
         system.shutdown
     }
+    Thread.sleep(5000)
     
     // Observe at t0
-    inbox.send(domain, GllElement.Interpolate(t0))
+    println("Observing t0")
+    inbox.send(domRouter, GllElement.Interpolate(t0))
     inbox.receive(10.seconds) match {
-      case 'AllObserved =>
+      case 'AllObserved => println("Observation1")
+    }
+    inbox.receive(10.seconds) match {
+      case 'AllObserved => println("Observation2")
     }
   
     val startTime = System.nanoTime
     for (i <- 1 to nSteps) {
       // Step
       val ti = dt*i
-      inbox.send(domain, GllElement.StepTo(ti))
+      inbox.send(domRouter, GllElement.StepTo(ti))
       inbox.receive(10.seconds) match {
-        case 'AllAdvanced => //println(s"All advanced to $ti!")
+        case 'AllAdvanced => println(s"All advanced to $ti!")
         case msg =>
           println("Unexpected message: " + msg)
           system.shutdown
       }
+      inbox.receive(10.seconds) match {
+        case 'AllAdvanced => println("AllAdvanced2")
+      }
 
       // Observe
       if (i%obsFreq == 0) {
-        inbox.send(domain, GllElement.Interpolate(ti))
+        inbox.send(domRouter, GllElement.Interpolate(ti))
         inbox.receive(10.seconds) match {
           case 'AllObserved => //println(s"All observed at $ti!")
           case msg =>
             println("Unexpected message: " + msg)
             system.shutdown
+        }
+        inbox.receive(10.seconds) match {
+          case 'AllObserved => println("Observation2")
         }
       }
     }
