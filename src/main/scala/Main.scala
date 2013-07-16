@@ -24,7 +24,7 @@ object Main extends App {
     val inbox = Inbox.create(system)
 
     val order = 8
-    val nElems = 8
+    val nElems = 100
     val t0 = 0.0
     val dt = 0.001
     val nSteps = 1000
@@ -49,16 +49,16 @@ object Main extends App {
         println("Unexpected message: " + msg)
         system.shutdown
     }
-    Thread.sleep(5000)
+    Thread.sleep(10000)
     
     // Observe at t0
     println("Observing t0")
     inbox.send(domRouter, GllElement.Interpolate(t0))
     inbox.receive(10.seconds) match {
-      case 'AllObserved => println("Observation1")
+      case 'AllObserved => //println("Observation1")
     }
     inbox.receive(10.seconds) match {
-      case 'AllObserved => println("Observation2")
+      case 'AllObserved => //println("Observation2")
     }
   
     val startTime = System.nanoTime
@@ -67,13 +67,13 @@ object Main extends App {
       val ti = dt*i
       inbox.send(domRouter, GllElement.StepTo(ti))
       inbox.receive(10.seconds) match {
-        case 'AllAdvanced => println(s"All advanced to $ti!")
+        case 'AllAdvanced => //println(s"All advanced to $ti!")
         case msg =>
           println("Unexpected message: " + msg)
           system.shutdown
       }
       inbox.receive(10.seconds) match {
-        case 'AllAdvanced => println("AllAdvanced2")
+        case 'AllAdvanced => //println("AllAdvanced2")
       }
 
       // Observe
@@ -86,7 +86,7 @@ object Main extends App {
             system.shutdown
         }
         inbox.receive(10.seconds) match {
-          case 'AllObserved => println("Observation2")
+          case 'AllObserved => //println("Observation2")
         }
       }
     }

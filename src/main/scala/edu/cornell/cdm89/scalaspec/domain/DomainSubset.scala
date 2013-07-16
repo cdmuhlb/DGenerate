@@ -23,7 +23,7 @@ class DomainSubset(dom: DomainInfo, pde: FluxConservativePde,
   val elements = mutable.Map.empty[Int, ActorRef]
   
   // HACK
-  val elemsOnNode1 = 4
+  val elemsOnNode1 = 50
   val nodeNum = if (Cluster(context.system).selfAddress.port == Some(2551)) 1 else 2
 
   // TODO: Inject BCs
@@ -63,14 +63,14 @@ class DomainSubset(dom: DomainInfo, pde: FluxConservativePde,
       }
     }
     
-    Thread.sleep(2000)
+    Thread.sleep(3000)
     
     // Create elements
     for (i <- 0 until dom.nElems) {
-      val x = dom.xL + i*width
-      val map = new AffineMap(x, x+width)
       if (((nodeNum == 1) && (i < elemsOnNode1)) ||
           ((nodeNum == 2) && (i >= elemsOnNode1))) {
+        val x = dom.xL + i*width
+        val map = new AffineMap(x, x+width)
         val elem = context.actorOf(Props(classOf[GllElement], basis, map, pde), s"interval$i")
         elements(i) = elem
       }
@@ -95,11 +95,11 @@ class DomainSubset(dom: DomainInfo, pde: FluxConservativePde,
   
   def ready: Receive = {
     case step: GllElement.StepTo =>
-      log.info("Stepping")
+      //log.info("Stepping")
       elements.values foreach { _ ! step }
       context.become(stepping(sender, emptyResponses))
     case interp: GllElement.Interpolate =>
-      log.info("Interpolating")
+      //log.info("Interpolating")
       elements.values foreach { _ ! interp }
       context.become(observing(sender, emptyResponses))
   }

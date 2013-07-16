@@ -23,7 +23,7 @@ object SlaveNode extends App {
     val inbox = Inbox.create(system)
     
     val order = 8
-    val nElems = 8
+    val nElems = 100
   
     val domInfo = DomainInfo(0.0, 10.0, order, nElems)
     val domain = system.actorOf(Props(classOf[DomainSubset], domInfo,
