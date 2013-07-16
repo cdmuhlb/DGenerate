@@ -16,8 +16,8 @@ import edu.cornell.cdm89.scalaspec.pde.LaxFriedrichsFlux.BoundaryValues
 import edu.cornell.cdm89.scalaspec.pde.FluxConservativePde
 import edu.cornell.cdm89.scalaspec.spectral.GllBasis
 
-class DomainSubset(dom: DomainInfo, pde: FluxConservativePde,
-    controller: ActorRef) extends Actor with ActorLogging {
+class Subdomain(dom: DomainInfo, pde: FluxConservativePde) extends Actor
+    with ActorLogging {
   val width = (dom.xR - dom.xL) / dom.nElems
   val basis = GllBasis(dom.order)
   val elements = mutable.Map.empty[Int, ActorRef]
@@ -25,63 +25,39 @@ class DomainSubset(dom: DomainInfo, pde: FluxConservativePde,
   // HACK
   val elemsOnNode1 = context.system.settings.config.getInt("harvest.elements-per-node")
   val nodeNum = if (Cluster(context.system).selfAddress.port == Some(2551)) 1 else 2
-
-  // TODO: Inject BCs
-  val nVars = 3
-  val leftBc = new BoundaryCondition {
-    def boundaryValues(t: Double, x: Double) = {
-      //val a = 2.0*math.Pi
-      //val u = math.sin(x - a*t)
-      BoundaryValues(t,
-          Vector.fill[Double](nVars)(0.0), Vector.fill[Double](nVars)(0.0), 1.0)
-          //Vector.fill[Double](nVars)(u), Vector.fill[Double](nVars)(a*u), 1.0)
-    }
-  }
-  val rightBc = new BoundaryCondition {
-    def boundaryValues(t: Double, x: Double) = BoundaryValues(t,
-        Vector.fill[Double](nVars)(0.0), Vector.fill[Double](nVars)(0.0), -1.0)
-  }
     
   override def preStart = {
-    // Create boundaries
-    if (nodeNum == 1) {
-      context.actorOf(Props(classOf[ExternalBoundaryActor], dom.xL, leftBc), "boundary0")
-      for (i <- 1 until elemsOnNode1.min(dom.nElems-1)) {
-        val x = dom.xL + i*width
-        context.actorOf(Props(classOf[InternalBoundaryActor], x), s"boundary$i")
-      }
-      if (dom.nElems < elemsOnNode1) {
-        context.actorOf(Props(classOf[ExternalBoundaryActor], dom.xR, rightBc), s"boundary${dom.nElems}")
-      }
-    } else {
-      for (i <- elemsOnNode1 to dom.nElems-1) {
-        val x = dom.xL + i*width
-        context.actorOf(Props(classOf[InternalBoundaryActor], x), s"boundary$i")
-      }
-      if (dom.nElems >= elemsOnNode1) {
-        context.actorOf(Props(classOf[ExternalBoundaryActor], dom.xR, rightBc), s"boundary${dom.nElems}")
+    // TODO: Inject BCs
+    val nVars = 3
+    val leftBc = new BoundaryCondition {
+      def boundaryValues(t: Double, x: Double) = {
+        //val a = 2.0*math.Pi
+        //val u = math.sin(x - a*t)
+        BoundaryValues(t,
+            Vector.fill[Double](nVars)(0.0), Vector.fill[Double](nVars)(0.0), 1.0)
+            //Vector.fill[Double](nVars)(u), Vector.fill[Double](nVars)(a*u), 1.0)
       }
     }
-    
-    // Wait for remote boundaries to be created
-    Thread.sleep(2000)
-    
-    // Create elements
-    for (i <- 0 until dom.nElems) {
-      if (((nodeNum == 1) && (i < elemsOnNode1)) ||
-          ((nodeNum == 2) && (i >= elemsOnNode1))) {
-        val x = dom.xL + i*width
-        val map = new AffineMap(x, x+width)
-        val elem = context.actorOf(Props(classOf[GllElement], basis, map, pde), s"interval$i")
-        elements(i) = elem
-      }
+    val rightBc = new BoundaryCondition {
+      def boundaryValues(t: Double, x: Double) = BoundaryValues(t,
+          Vector.fill[Double](nVars)(0.0), Vector.fill[Double](nVars)(0.0), -1.0)
     }
-    self ! 'Initialize
+
+    createBoundaries(leftBc, rightBc)
   }
   
-  def receive = {
-    case 'Initialize =>
-      controller ! 'DomainInitializing
+  def receive = setup1
+  
+  def setup1: Receive = {
+    case 'CreateElements =>
+      createElements()
+      sender ! 'ElementsCreated
+      context.become(setup2(sender))
+  }
+  
+  def setup2(controller: ActorRef): Receive = {
+    case 'GetCoordsForId =>
+      elements.values foreach { _ forward 'GetCoords }
       context.become(initializing(controller, emptyResponses))
   }
   
@@ -146,5 +122,43 @@ class DomainSubset(dom: DomainInfo, pde: FluxConservativePde,
     }
     out.println
     out.close()
+  }
+  
+  private def createBoundaries(leftBc: BoundaryCondition,
+      rightBc: BoundaryCondition): Unit = {
+    if (nodeNum == 1) {
+      context.actorOf(Props(classOf[ExternalBoundaryActor],
+          dom.xL, leftBc), "boundary0")
+      for (i <- 1 until elemsOnNode1.min(dom.nElems)) {
+        val x = dom.xL + i*width
+        context.actorOf(Props(classOf[InternalBoundaryActor], x), s"boundary$i")
+      }
+      if (dom.nElems < elemsOnNode1) {
+        context.actorOf(Props(classOf[ExternalBoundaryActor],
+            dom.xR, rightBc), s"boundary${dom.nElems}")
+      }
+    } else {
+      for (i <- elemsOnNode1 to dom.nElems-1) {
+        val x = dom.xL + i*width
+        context.actorOf(Props(classOf[InternalBoundaryActor], x), s"boundary$i")
+      }
+      if (dom.nElems >= elemsOnNode1) {
+        context.actorOf(Props(classOf[ExternalBoundaryActor],
+            dom.xR, rightBc), s"boundary${dom.nElems}")
+      }
+    }
+  }
+  
+  private def createElements(): Unit = {
+    for (i <- 0 until dom.nElems) {
+      if (((nodeNum == 1) && (i < elemsOnNode1)) ||
+          ((nodeNum == 2) && (i >= elemsOnNode1))) {
+        val x = dom.xL + i*width
+        val map = new AffineMap(x, x+width)
+        val elem = context.actorOf(Props(classOf[GllElement], basis, map, pde),
+            s"interval$i")
+        elements(i) = elem
+      }
+    }
   }
 }

@@ -83,7 +83,7 @@ class GllElement(basis: GllBasis, map: AffineMap,
     if (((nodeNum == 1) && (index+1 < elemsOnNode1)) || (nodeNum == 2)) {
       context.actorSelection(s"../boundary${index+1}") ! Identify('Right)
     } else {
-      context.actorSelection(node2 + s"user/domain0/boundary${index+1}") ! Identify('Right)
+      context.actorSelection(node2 + s"user/subdomain/boundary${index+1}") ! Identify('Right)
     }
   }
   
@@ -93,24 +93,31 @@ class GllElement(basis: GllBasis, map: AffineMap,
   
   def setup(tracker: SetupTracker): Receive = {
     case ActorIdentity('Left, Some(actor)) =>
+      //log.info("Got left")
       tracker.haveLeft(actor)
     case ActorIdentity('Right, Some(actor)) =>
+      //log.info("Got right")
       tracker.haveRight(actor)
     case ActorIdentity(lr, None) =>
-      log.error(s"No actor for boundary at $lr")
+      //log.error(s"No actor for boundary at $lr")
     case InitialData(state) =>
+      //log.info("Got early ID")
       tracker.haveId(state)
     case 'GetCoords =>
+      //log.info("Giving early coords")
       sender ! Coords(coords)
   }
   
   def uninitialized(ode: Ode): Receive = {
     case 'GetCoords =>
+      //log.info("Giving late coords")
       sender ! Coords(coords)
     case InitialData(state) =>
+      //log.info("Got late ID")
       import context.dispatcher
       ode.rhs(state) onSuccess { case rhs => self ! RhsResult(state, rhs) }
     case RhsResult(state, rhs) =>
+      //log.info("Got RHS")
       val stepper = context.system.actorOf(Props(classOf[BogackiShampineStepper], ode, self, controller))
       controller ! 'Ready
       context.become(initialized(stepper, state, rhs))
