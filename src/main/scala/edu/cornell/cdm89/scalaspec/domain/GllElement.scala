@@ -1,7 +1,7 @@
 package edu.cornell.cdm89.scalaspec.domain
 
 import akka.actor.{Actor, ActorLogging, ActorRef, Props}
-import akka.actor.{ActorIdentity, Identify}
+import akka.actor.{Address, ActorIdentity, Identify}
 import breeze.linalg.DenseVector
 
 import edu.cornell.cdm89.scalaspec.spectral.GllBasis
@@ -14,6 +14,7 @@ object GllElement {
   case class StepTo(t: Double)
   case class AdvanceState(newState: OdeState, rhs: FieldVec)
   case class RhsResult(state: OdeState, rhs: FieldVec)
+  case class Coords(x: DenseVector[Double])
   case class Interpolate(t: Double)
   case class Interpolation(state: OdeState, x: DenseVector[Double])
 }
@@ -23,6 +24,7 @@ class GllElement(basis: GllBasis, map: AffineMap,
   val controller = context.parent
   val name = self.path.name
   val coords = basis.nodes map map.mapX
+  val minDx = (coords.toArray.sliding(2) map {p => p(1) - p(0)}).min
   
   class SetupTracker {
     private var leftBoundary = Option.empty[ActorRef]
@@ -66,8 +68,21 @@ class GllElement(basis: GllBasis, map: AffineMap,
     // look up boundaries
     assert(name.startsWith("interval"))
     val index = name.substring(8).toInt
+    //context.actorSelection(s"../boundary$index") ! Identify('Left)
+    //context.actorSelection(s"../boundary${index+1}") ! Identify('Right)
+    
+    val elemsOnNode1 = 999
+    val node2 = Address("akka.tcp", "Harvest", "127.0.0.1", 2552)
     context.actorSelection(s"../boundary$index") ! Identify('Left)
-    context.actorSelection(s"../boundary${index+1}") ! Identify('Right)
+    if (index < elemsOnNode1) {
+      if (index + 1 < elemsOnNode1) {
+        context.actorSelection(s"../boundary${index+1}") ! Identify('Right)
+      } else {
+        context.actorSelection(node2 + s"user/dommain0/boundary${index+1}") ! Identify('Right)
+      }
+    } else {
+      context.actorSelection(s"../boundary${index+1}") ! Identify('Right)
+    }
   }
   
   import GllElement._
@@ -81,14 +96,17 @@ class GllElement(basis: GllBasis, map: AffineMap,
       tracker.haveRight(actor)
     case InitialData(state) =>
       tracker.haveId(state)
+    case 'GetCoords =>
+      sender ! Coords(coords)
   }
   
   def uninitialized(ode: Ode): Receive = {
+    case 'GetCoords =>
+      sender ! Coords(coords)
     case InitialData(state) =>
       import context.dispatcher
       ode.rhs(state) onSuccess { case rhs => self ! RhsResult(state, rhs) }
     case RhsResult(state, rhs) =>
-      //log.info("Got initial RHS")
       val stepper = context.system.actorOf(Props(classOf[BogackiShampineStepper], ode, self, controller))
       controller ! 'Ready
       context.become(initialized(stepper, state, rhs))
@@ -100,6 +118,9 @@ class GllElement(basis: GllBasis, map: AffineMap,
     case AdvanceState(newState, newRhs) =>
       controller ! 'Advanced
       context.become(active(stepper, state, rhs, newState, newRhs))
+    case Interpolate(t) =>
+      require(t == state.t)
+      sender ! Interpolation(state, coords)
   }
   
   def active(stepper: ActorRef, lastState: OdeState, lastRhs: FieldVec,

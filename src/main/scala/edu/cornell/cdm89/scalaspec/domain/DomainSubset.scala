@@ -3,6 +3,8 @@ package edu.cornell.cdm89.scalaspec.domain
 import java.io._
 
 import akka.actor.{Actor, ActorLogging, ActorRef, Props}
+import akka.actor.{Address, Deploy}
+import akka.remote.RemoteScope
 import scala.collection.mutable
 import breeze.linalg.DenseVector
 
@@ -13,68 +15,69 @@ import edu.cornell.cdm89.scalaspec.pde.LaxFriedrichsFlux.BoundaryValues
 import edu.cornell.cdm89.scalaspec.pde.FluxConservativePde
 import edu.cornell.cdm89.scalaspec.spectral.GllBasis
 
-class DomainSubset(xL: Double, xR: Double, nElems: Int, order: Int,
-    pde: FluxConservativePde) extends Actor with ActorLogging {
-  val width = (xR - xL) / nElems
-  val basis = GllBasis(order)
+class DomainSubset(dom: DomainInfo, pde: FluxConservativePde) extends Actor
+    with ActorLogging {
+  val width = (dom.xR - dom.xL) / dom.nElems
+  val basis = GllBasis(dom.order)
   val elements = mutable.Map.empty[Int, ActorRef]
+  
+  // HACK
+  val elemsOnNode1 = 999
+  val node2 = Address("akka.tcp", "Harvest", "127.0.0.1", 2552)
 
   // TODO: Inject BCs
+  val nVars = 3
   val leftBc = new BoundaryCondition {
-    def boundaryValues(t: Double, x: Double) = BoundaryValues(t,
-        Vector.fill[Double](3)(0.0), Vector.fill[Double](3)(0.0), 1.0)
+    def boundaryValues(t: Double, x: Double) = {
+      //val a = 2.0*math.Pi
+      //val u = math.sin(x - a*t)
+      BoundaryValues(t,
+          Vector.fill[Double](nVars)(0.0), Vector.fill[Double](nVars)(0.0), 1.0)
+          //Vector.fill[Double](nVars)(u), Vector.fill[Double](nVars)(a*u), 1.0)
+    }
   }
   val rightBc = new BoundaryCondition {
     def boundaryValues(t: Double, x: Double) = BoundaryValues(t,
-        Vector.fill[Double](3)(0.0), Vector.fill[Double](3)(0.0), -1.0)
+        Vector.fill[Double](nVars)(0.0), Vector.fill[Double](nVars)(0.0), -1.0)
   }
     
   override def preStart = {
     // Create boundaries
-    context.actorOf(Props(classOf[ExternalBoundaryActor], xL, leftBc), "boundary0")
-    for (i <- 1 to nElems-1) {
-      val x = xL + i*width
-      context.actorOf(Props(classOf[InternalBoundaryActor], x), s"boundary$i")
+    context.actorOf(Props(classOf[ExternalBoundaryActor], dom.xL, leftBc), "boundary0")
+    for (i <- 1 to dom.nElems-1) {
+      val x = dom.xL + i*width
+      if (i < elemsOnNode1) {
+        context.actorOf(Props(classOf[InternalBoundaryActor], x), s"boundary$i")
+      } else {
+        context.actorOf(Props(classOf[InternalBoundaryActor], x).withDeploy(
+            Deploy(scope = RemoteScope(node2))), s"boundary$i")
+      }
     }
-    context.actorOf(Props(classOf[ExternalBoundaryActor], xR, rightBc), s"boundary$nElems")
+    if (dom.nElems < elemsOnNode1) {
+      context.actorOf(Props(classOf[ExternalBoundaryActor], dom.xR, rightBc), s"boundary${dom.nElems}")
+    } else {
+      context.actorOf(Props(classOf[ExternalBoundaryActor], dom.xR, rightBc).withDeploy(
+            Deploy(scope = RemoteScope(node2))), s"boundary${dom.nElems}")
+    }
     
     // Create elements
-    for (i <- 0 until nElems) {
-      val x = xL + i*width
+    for (i <- 0 until dom.nElems) {
+      val x = dom.xL + i*width
       val map = new AffineMap(x, x+width)
-      val elem = context.actorOf(Props(classOf[GllElement], basis, map, pde), s"interval$i")
+      val elem = if (i < elemsOnNode1) {
+        context.actorOf(Props(classOf[GllElement], basis, map, pde), s"interval$i")
+      } else {
+        context.actorOf(Props(classOf[GllElement], basis, map, pde).withDeploy(
+            Deploy(scope = RemoteScope(node2))), s"interval$i")
+      }
       elements(i) = elem
     }
   }
   
   def receive = {
-    case 'SendId =>
-      val zeroId = OdeState(0.0, Vector(DenseVector.zeros[Double](order+1),
-        DenseVector.zeros[Double](order+1), DenseVector.zeros[Double](order+1)))
-      for ((k, v) <- elements) {
-        val id = if (k == 5) {
-          val myPsi = DenseVector.zeros[Double](order+1)
-          val c = order/2
-          myPsi(c-2) = 0.3; myPsi(c-1) = 0.6; myPsi(c) = 1.0; myPsi(c+1) = 0.6; myPsi(c+2) = 0.3
-          val myPi = DenseVector.zeros[Double](order+1)
-          val myPhi = basis.differentiate(myPsi)
-          OdeState(0.0, Vector(myPsi, myPi, myPhi))
-        } else zeroId
-        v ! GllElement.InitialData(id)
-      }
-      
-      /* val zeroId = OdeState(0.0, Vector(DenseVector.zeros[Double](order+1)))
-      for ((k, v) <- elements) {
-        val id = if (k == 5) {
-          val myPsi = DenseVector.zeros[Double](order+1)
-          myPsi(2) = 0.3; myPsi(3) = 0.6; myPsi(4) = 1.0; myPsi(5) = 0.6; myPsi(6) = 0.3
-          OdeState(0.0, Vector(myPsi))
-        } else zeroId
-        v ! GllElement.InitialData(id)
-      } */
-        
+    case 'Initialize =>
+      sender ! 'Initializing
       context.become(initializing(sender, emptyResponses))
-    case msg => log.info("Dunno what to do: " + msg)
   }
   
   def initializing(controller: ActorRef, responses: mutable.Map[ActorRef, Boolean]): Receive = {

@@ -35,7 +35,7 @@ class BogackiShampineStepper(ode: Ode, element: ActorRef, controller: ActorRef) 
     case TakeStep(dt, state1, k1) =>
       val t2 = state1.t + 0.5*dt
       val y2 = state1.u.zip(k1) map { case(u, k) =>
-        u + k:*(0.5*dt)
+        u + (k:*(0.5*dt))
       }
       val state2 = OdeState(t2, y2)
       val k2Future = ode.rhs(state2)
@@ -47,7 +47,7 @@ class BogackiShampineStepper(ode: Ode, element: ActorRef, controller: ActorRef) 
     case Stage2Result(k2) =>
       val t3 = state1.t + 0.75*dt
       val y3 = state1.u.zip(k2) map { case(u, k) =>
-        u + k:*(0.75*dt)
+        u + (k:*(0.75*dt))
       }
       val state3 = OdeState(t3, y3)
       val k3Future = ode.rhs(state3)

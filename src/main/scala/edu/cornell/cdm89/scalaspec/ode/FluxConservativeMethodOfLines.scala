@@ -39,8 +39,10 @@ class FluxConservativeMethodOfLines(pde: FluxConservativePde, basis: GllBasis,
       val ans = bulkFlux.zip(bulkSource) map { case (fi, gi) =>
         (basis.differentiate(fi) :* (-1.0/jacobian)) + gi
       }
-      
+
       for (i <- ans.indices) {
+        //println(s"dFL($i) = ${(fL(i) - fStarL.fStar(i)) / (jacobian * weights(0))}")
+        //println(s"dFR($i) = ${(fR(i) - fStarR.fStar(i)) / (jacobian * weights(basis.order))}")
         ans(i)(0) -= (fL(i) - fStarL.fStar(i)) / (jacobian * weights(0))
         ans(i)(basis.order) += (fR(i) - fStarR.fStar(i)) / (jacobian * weights(basis.order))
       }

@@ -8,8 +8,8 @@ object LaxFriedrichsFlux {
   case class NumericalFlux(t: Double, fStar: PointVec)
   
   def flux(bv1: BoundaryValues, bv2: BoundaryValues): NumericalFlux = {
-    //val c = 0.5
-    val c = 0.0
+    //val c = 2.0*math.Pi
+    val c = 1.0
     assert(bv1.t == bv2.t)
     val fStar = bv1.u.zip(bv1.flux.zip(bv2.u.zip(bv2.flux))) map {
       case (u1, (f1, (u2, f2))) =>
