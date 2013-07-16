@@ -23,7 +23,7 @@ class DomainSubset(dom: DomainInfo, pde: FluxConservativePde,
   val elements = mutable.Map.empty[Int, ActorRef]
   
   // HACK
-  val elemsOnNode1 = 50
+  val elemsOnNode1 = context.system.settings.config.getInt("harvest.elements-per-node")
   val nodeNum = if (Cluster(context.system).selfAddress.port == Some(2551)) 1 else 2
 
   // TODO: Inject BCs
@@ -63,7 +63,8 @@ class DomainSubset(dom: DomainInfo, pde: FluxConservativePde,
       }
     }
     
-    Thread.sleep(3000)
+    // Wait for remote boundaries to be created
+    Thread.sleep(2000)
     
     // Create elements
     for (i <- 0 until dom.nElems) {

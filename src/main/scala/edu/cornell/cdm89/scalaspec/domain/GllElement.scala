@@ -73,7 +73,7 @@ class GllElement(basis: GllBasis, map: AffineMap,
     //context.actorSelection(s"../boundary${index+1}") ! Identify('Right)
     
     // HACK
-    val elemsOnNode1 = 50
+    val elemsOnNode1 = context.system.settings.config.getInt("harvest.elements-per-node")
     val nodeNum = if (Cluster(context.system).selfAddress.port == Some(2551)) 1 else 2
     // Using actorSelection(Address) seems to produce deadLetters instead of None
     //val node2 = Address("akka.tcp", "Harvest", "127.0.0.1", 2552)

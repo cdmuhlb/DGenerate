@@ -23,12 +23,13 @@ object Main extends App {
   
     val inbox = Inbox.create(system)
 
-    val order = 8
-    val nElems = 100
-    val t0 = 0.0
-    val dt = 0.001
-    val nSteps = 1000
-    val obsFreq = 10
+    val order = config.getInt("harvest.order-of-elements")
+    val nElems = config.getInt("harvest.nr-of-elements")
+    val t0 = config.getDouble("harvest.initial-time")
+    val dt = config.getDouble("harvest.step-size")
+    val nSteps = config.getInt("harvest.nr-of-steps")
+    val obsFreq = config.getInt("harvest.steps-per-obs")
+    val doObserve = config.getBoolean("harvest.observe-solution")
   
     val domInfo = DomainInfo(0.0, 10.0, order, nElems)
     val domain = system.actorOf(Props(classOf[DomainSubset], domInfo,
@@ -37,7 +38,7 @@ object Main extends App {
         inbox.getRef), "domain0")
     inbox.receive(10.seconds) match {
       // Don't send ID until domain is ready for its actors' messages
-      case 'DomainInitializing =>
+      case 'DomainInitializing =>  println("Node1 is ready for ID")
     }
     val domRouter = system.actorOf(Props.empty.withRouter(FromConfig), "domRouter")
     
@@ -49,18 +50,22 @@ object Main extends App {
         println("Unexpected message: " + msg)
         system.shutdown
     }
-    Thread.sleep(10000)
+    // Wait for AllReady from slave node
+    Thread.sleep(2000)
     
     // Observe at t0
-    println("Observing t0")
-    inbox.send(domRouter, GllElement.Interpolate(t0))
-    inbox.receive(10.seconds) match {
-      case 'AllObserved => //println("Observation1")
-    }
-    inbox.receive(10.seconds) match {
-      case 'AllObserved => //println("Observation2")
+    if (doObserve) {
+      println("Observing t0")
+      inbox.send(domRouter, GllElement.Interpolate(t0))
+      inbox.receive(10.seconds) match {
+        case 'AllObserved => //println("Observation1")
+      }
+      inbox.receive(10.seconds) match {
+        case 'AllObserved => //println("Observation2")
+      }
     }
   
+    println("Starting evolution")
     val startTime = System.nanoTime
     for (i <- 1 to nSteps) {
       // Step
@@ -77,21 +82,25 @@ object Main extends App {
       }
 
       // Observe
-      if (i%obsFreq == 0) {
-        inbox.send(domRouter, GllElement.Interpolate(ti))
-        inbox.receive(10.seconds) match {
-          case 'AllObserved => //println(s"All observed at $ti!")
-          case msg =>
-            println("Unexpected message: " + msg)
-            system.shutdown
-        }
-        inbox.receive(10.seconds) match {
-          case 'AllObserved => //println("Observation2")
+      if (doObserve) {
+        if (i%obsFreq == 0) {
+          inbox.send(domRouter, GllElement.Interpolate(ti))
+          inbox.receive(10.seconds) match {
+            case 'AllObserved => //println(s"All observed at $ti!")
+            case msg =>
+              println("Unexpected message: " + msg)
+              system.shutdown
+          }
+          inbox.receive(10.seconds) match {
+            case 'AllObserved => //println("Observation2")
+          }
         }
       }
+
     }
     val stopTime = System.nanoTime
     val runtime = 1.0e-9 * (stopTime - startTime)
+    println("Finishing evolution")
     println(f"dt = $runtime%.3f")
 
     system.shutdown()

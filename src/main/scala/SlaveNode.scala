@@ -20,10 +20,12 @@ object SlaveNode extends App {
   val system = ActorSystem("Harvest", config)
   
   Cluster(system) registerOnMemberUp {
+    println(s"Cluster is UP")
+
     val inbox = Inbox.create(system)
     
-    val order = 8
-    val nElems = 100
+    val order = config.getInt("harvest.order-of-elements")
+    val nElems = config.getInt("harvest.nr-of-elements")
   
     val domInfo = DomainInfo(0.0, 10.0, order, nElems)
     val domain = system.actorOf(Props(classOf[DomainSubset], domInfo,
@@ -39,8 +41,5 @@ object SlaveNode extends App {
     inbox.receive(10.seconds) match {
       case 'AllReady => println("All ready!")
     }
-    
-    //Thread.sleep(2.seconds.toMillis)
-    //system.shutdown()
   }
 }
