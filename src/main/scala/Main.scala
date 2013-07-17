@@ -88,7 +88,7 @@ object Main extends App {
       def waitForResponses(response: Any): Unit = {
         var count = 0
         while (count < nNodes) {
-          inbox.receive(10.seconds) match {
+          inbox.receive(2.minutes) match {
             case `response` =>
               count += 1
             case msg =>
@@ -103,6 +103,14 @@ object Main extends App {
 
       inbox.send(idRouter, 'ProvideId)
       waitForResponses('AllReady)
+
+      /* println("Warming up")
+      for (i <- 1 to 500) {
+        val ti = dt*i
+        inbox.send(domRouter, GllElement.StepTo(ti))
+        waitForResponses('AllAdvanced)
+      }
+      System.gc() */
 
       // Observe at t0
       if (doObserve) {
