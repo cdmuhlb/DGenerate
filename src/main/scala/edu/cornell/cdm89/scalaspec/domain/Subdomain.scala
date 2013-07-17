@@ -11,40 +11,16 @@ import breeze.linalg.DenseVector
 
 import edu.cornell.cdm89.scalaspec.ode.OdeState
 import edu.cornell.cdm89.scalaspec.ode.BogackiShampineStepper.ErrorEstimate
-import edu.cornell.cdm89.scalaspec.pde.BoundaryCondition
-import edu.cornell.cdm89.scalaspec.pde.LaxFriedrichsFlux.BoundaryValues
 import edu.cornell.cdm89.scalaspec.pde.FluxConservativePde
 import edu.cornell.cdm89.scalaspec.spectral.GllBasis
 
-object Subdomain {
-  case class OwnerPolicy(nodeId: Int, numNodes: Int, elemsPerNode: Int)
-}
-
-class Subdomain(dom: DomainInfo, pde: FluxConservativePde,
-    dist: Subdomain.OwnerPolicy) extends Actor with ActorLogging {
-  val width = (dom.xR - dom.xL) / dom.nElems
-  val basis = GllBasis(dom.order)
+class Subdomain(grid: GridDistribution, pde: FluxConservativePde,
+    nodeId: Int) extends Actor with ActorLogging {
   val boundaries = mutable.Map.empty[Int, ActorRef]
   val elements = mutable.Map.empty[Int, ActorRef]
     
   override def preStart = {
-    // TODO: Inject BCs
-    val nVars = 3
-    val leftBc = new BoundaryCondition {
-      def boundaryValues(t: Double, x: Double) = {
-        //val a = 2.0*math.Pi
-        //val u = math.sin(x - a*t)
-        BoundaryValues(t,
-            Vector.fill[Double](nVars)(0.0), Vector.fill[Double](nVars)(0.0), 1.0)
-            //Vector.fill[Double](nVars)(u), Vector.fill[Double](nVars)(a*u), 1.0)
-      }
-    }
-    val rightBc = new BoundaryCondition {
-      def boundaryValues(t: Double, x: Double) = BoundaryValues(t,
-          Vector.fill[Double](nVars)(0.0), Vector.fill[Double](nVars)(0.0), -1.0)
-    }
-
-    createBoundaries(leftBc, rightBc)
+    createBoundaries()
   }
   
   def receive = setup1
@@ -126,37 +102,24 @@ class Subdomain(dom: DomainInfo, pde: FluxConservativePde,
     out.close()
   }
   
-  private def createBoundaries(leftBc: BoundaryCondition,
-      rightBc: BoundaryCondition): Unit = {
-    if (dist.nodeId == 1) {
-      boundaries(0) = context.actorOf(Props(classOf[ExternalBoundaryActor],
-          dom.xL, leftBc), "boundary0")
+  private def createBoundaries(): Unit = {
+    for ((b, bc) <- grid.myExternalBoundaries(nodeId)) {
+      boundaries(b.index) = context.actorOf(Props(classOf[ExternalBoundaryActor],
+          b.x, bc), s"boundary${b.index}")
     }
-    for (i <- 1 until dom.nElems) {
-      if ((i >= (dist.nodeId-1)*dist.elemsPerNode) &&
-          (i < dist.nodeId*dist.elemsPerNode)) {
-        val x = dom.xL + i*width
-        boundaries(i) = context.actorOf(Props(classOf[InternalBoundaryActor],
-            x), s"boundary$i")
-      }
-    }
-    if ((dom.nElems > (dist.nodeId-1)*dist.elemsPerNode) &&
-          (dom.nElems <= dist.nodeId*dist.elemsPerNode)) {
-      boundaries(dom.nElems) = context.actorOf(Props(classOf[ExternalBoundaryActor],
-          dom.xR, rightBc), s"boundary${dom.nElems}")
+    for (b <- grid.myInternalBoundaries(nodeId)) {
+      boundaries(b.index) = context.actorOf(Props(classOf[InternalBoundaryActor],
+            b.x), s"boundary${b.index}")
     }
   }
   
   private def createElements(domainRouter: ActorRef): Unit = {
-    for (i <- 0 until dom.nElems) {
-      if ((i >= (dist.nodeId-1)*dist.elemsPerNode) &&
-          (i < dist.nodeId*dist.elemsPerNode)) {
-        val x = dom.xL + i*width
-        val map = new AffineMap(x, x+width)
-        val elem = context.actorOf(Props(classOf[GllElement], basis, map, pde, domainRouter),
-            s"interval$i")
-        elements(i) = elem
-      }
+    val bases = mutable.Map.empty[Int, GllBasis]
+    for (e <- grid.myElements(nodeId)) {
+      val map = new AffineMap(e.xL, e.xR)
+      val basis = bases.getOrElseUpdate(e.order, GllBasis(e.order))
+      elements(e.index) = context.actorOf(Props(classOf[GllElement],
+          basis, map, pde, domainRouter), s"interval${e.index}")
     }
   }
 }

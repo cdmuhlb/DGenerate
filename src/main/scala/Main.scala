@@ -8,18 +8,29 @@ import scala.concurrent.duration._
 import com.typesafe.config.ConfigFactory
 
 import edu.cornell.cdm89.scalaspec.domain.{DomainInfo, Subdomain, GllElement}
+import edu.cornell.cdm89.scalaspec.domain.{ContiguousGrid, RoundRobinGrid}
+import edu.cornell.cdm89.scalaspec.pde.BoundaryCondition
+import edu.cornell.cdm89.scalaspec.pde.LaxFriedrichsFlux.BoundaryValues
 import edu.cornell.cdm89.scalaspec.ode.OdeState
 import edu.cornell.cdm89.scalaspec.pde.{ScalarWaveEquation, ScalarAdvectionEquation}
 import edu.cornell.cdm89.scalaspec.pde.{SineWaveInitialData, TrianglePulseInitialData}
 
 object Main extends App {
-  val config = (
-      if (args.nonEmpty) ConfigFactory.parseString(s"akka.remote.netty.tcp.port=${args(0)}")
-      else ConfigFactory.empty
-    ).withFallback(ConfigFactory.parseString("akka.cluster.roles = [compute]")
-    ).withFallback(ConfigFactory.load())
+  val config = {
+    if (args.length != 2) {
+      Console.err.println("Usage: Main <hostname> <port>")
+      System.exit(1)
+    }
+    val hostname = s""""${args(0)}""""
+    val port = args(1)
+    ConfigFactory.parseString(s"akka.remote.netty.tcp.hostname=$hostname").withFallback(
+        ConfigFactory.parseString(s"akka.remote.netty.tcp.port=$port").withFallback(
+        ConfigFactory.parseString("akka.cluster.roles = [compute]").withFallback(
+        ConfigFactory.load())))
+  }
   val system = ActorSystem("Harvest", config)
-  
+
+  // Load configuration
   val order = config.getInt("harvest.order-of-elements")
   val nElems = config.getInt("harvest.nr-of-elements")
   val seedNodes = immutableSeq(config.getStringList(
@@ -31,79 +42,98 @@ object Main extends App {
   val obsFreq = config.getInt("harvest.steps-per-obs")
   val doObserve = config.getBoolean("harvest.observe-solution")
   val nNodes = config.getInt("akka.cluster.role.compute.min-nr-of-members")
-  val nodeId = 1 // Main is node 1 by definition
-  val elemsPerNode = config.getInt("harvest.elements-per-node")
+  val nodeId = Cluster(system).selfAddress.port.get - 2552 // Hack
+  require((nodeId >= 0) && (nodeId < nNodes))
+  
+  // Boundary conditions
+  val nVars = 3
+    val leftBc = new BoundaryCondition {
+      def boundaryValues(t: Double, x: Double) = {
+        //val a = 2.0*math.Pi
+        //val u = math.sin(x - a*t)
+        BoundaryValues(t,
+            Vector.fill[Double](nVars)(0.0), Vector.fill[Double](nVars)(0.0), 1.0)
+            //Vector.fill[Double](nVars)(u), Vector.fill[Double](nVars)(a*u), 1.0)
+      }
+    }
+    val rightBc = new BoundaryCondition {
+      def boundaryValues(t: Double, x: Double) = BoundaryValues(t,
+          Vector.fill[Double](nVars)(0.0), Vector.fill[Double](nVars)(0.0), -1.0)
+    }
 
+  // Create domain
   val domInfo = DomainInfo(0.0, 10.0, order, nElems)
-  val subdomain = system.actorOf(Props(classOf[Subdomain], domInfo,
+  //val grid = new ContiguousGrid(domInfo, nNodes, leftBc, rightBc)
+  val grid = new RoundRobinGrid(domInfo, nNodes, leftBc, rightBc)
+  val subdomain = system.actorOf(Props(classOf[Subdomain], grid,
       //new ScalarAdvectionEquation(2.0*math.Pi),
       new ScalarWaveEquation,
-      Subdomain.OwnerPolicy(nodeId, nNodes, elemsPerNode)), "subdomain")
+      nodeId), "subdomain")
 
+  // Establish initial data
   //val idActor = system.actorOf(Props[SineWaveInitialData], "idProvider")
   val idActor = system.actorOf(Props(classOf[TrianglePulseInitialData],
       subdomain, 5.0, 0.5, 1.0), "idProvider")
-  
-  val domRouter = system.actorOf(Props.empty.withRouter(FromConfig), "domain")
-  val idRouter = system.actorOf(Props.empty.withRouter(FromConfig), "initialData")
 
-  println(s"Joining seed notes $seedNodes")
   Cluster(system).joinSeedNodes(seedNodes)
 
-  Cluster(system) registerOnMemberUp {
-    println(s"Cluster is UP")
-    val inbox = Inbox.create(system)
+  if (nodeId == 0) {
+    val domRouter = system.actorOf(Props.empty.withRouter(FromConfig), "domain")
+    val idRouter = system.actorOf(Props.empty.withRouter(FromConfig), "initialData")
+
+    Cluster(system).registerOnMemberUp {
+      println(s"Cluster is UP")
+      val inbox = Inbox.create(system)
     
-    def waitForResponses(response: Any): Unit = {
-      var count = 0
-      while (count < nNodes) {
-        inbox.receive(10.seconds) match {
-          case `response` =>
-            count += 1
-            //println("Tick")
-          case msg =>
-            println("Unexpected message: $msg ; expected: $response")
-            system.shutdown()
+      def waitForResponses(response: Any): Unit = {
+        var count = 0
+        while (count < nNodes) {
+          inbox.receive(10.seconds) match {
+            case `response` =>
+              count += 1
+            case msg =>
+              println("Unexpected message: $msg ; expected: $response")
+              system.shutdown()
+          }
         }
       }
-      //println("In sync")
-    }
-    
-    inbox.send(domRouter, GllElement.CreateElements(domRouter))
-    waitForResponses('ElementsCreated)
 
-    inbox.send(idRouter, 'ProvideId)
-    waitForResponses('AllReady)
-    
-    // Observe at t0
-    if (doObserve) {
-      println("Observing t0")
-      inbox.send(domRouter, GllElement.Interpolate(t0))
-      waitForResponses('AllObserved)
-    }
-  
-    println("Starting evolution")
-    val startTime = System.nanoTime
-    for (i <- 1 to nSteps) {
-      // Step
-      val ti = dt*i
-      inbox.send(domRouter, GllElement.StepTo(ti))
-      waitForResponses('AllAdvanced)
+      inbox.send(domRouter, GllElement.CreateElements(domRouter))
+      waitForResponses('ElementsCreated)
 
-      // Observe
+      inbox.send(idRouter, 'ProvideId)
+      waitForResponses('AllReady)
+
+      // Observe at t0
       if (doObserve) {
-        if (i%obsFreq == 0) {
-          inbox.send(domRouter, GllElement.Interpolate(ti))
-          waitForResponses('AllObserved)
-        }
+        println("Observing t0")
+        inbox.send(domRouter, GllElement.Interpolate(t0))
+        waitForResponses('AllObserved)
       }
 
-    }
-    val stopTime = System.nanoTime
-    val runtime = 1.0e-9 * (stopTime - startTime)
-    println("Finishing evolution")
-    println(f"Computation time: $runtime%.3f s")
+      println("Starting evolution")
+      val startTime = System.nanoTime
+      for (i <- 1 to nSteps) {
+        // Step
+        val ti = dt*i
+        inbox.send(domRouter, GllElement.StepTo(ti))
+        waitForResponses('AllAdvanced)
 
-    system.shutdown()
+        // Observe
+        if (doObserve) {
+          if (i%obsFreq == 0) {
+            inbox.send(domRouter, GllElement.Interpolate(ti))
+            waitForResponses('AllObserved)
+          }
+        }
+      }
+      val stopTime = System.nanoTime
+      val runtime = 1.0e-9 * (stopTime - startTime)
+      println("Finishing evolution")
+      println(f"Computation time: $runtime%.3f s")
+
+      system.shutdown()
+    }
   }
+
 }
