@@ -31,12 +31,14 @@ object Main extends App {
   val obsFreq = config.getInt("harvest.steps-per-obs")
   val doObserve = config.getBoolean("harvest.observe-solution")
   val nNodes = config.getInt("akka.cluster.role.compute.min-nr-of-members")
+  val nodeId = 1 // Main is node 1 by definition
+  val elemsPerNode = config.getInt("harvest.elements-per-node")
 
   val domInfo = DomainInfo(0.0, 10.0, order, nElems)
   val subdomain = system.actorOf(Props(classOf[Subdomain], domInfo,
-      //new ScalarAdvectionEquation(2.0*math.Pi)),
-      new ScalarWaveEquation),
-      "subdomain")
+      //new ScalarAdvectionEquation(2.0*math.Pi),
+      new ScalarWaveEquation,
+      Subdomain.OwnerPolicy(nodeId, nNodes, elemsPerNode)), "subdomain")
 
   //val idActor = system.actorOf(Props[SineWaveInitialData], "idProvider")
   val idActor = system.actorOf(Props(classOf[TrianglePulseInitialData],
@@ -67,7 +69,7 @@ object Main extends App {
       //println("In sync")
     }
     
-    inbox.send(domRouter, 'CreateElements)
+    inbox.send(domRouter, GllElement.CreateElements(domRouter))
     waitForResponses('ElementsCreated)
 
     inbox.send(idRouter, 'ProvideId)

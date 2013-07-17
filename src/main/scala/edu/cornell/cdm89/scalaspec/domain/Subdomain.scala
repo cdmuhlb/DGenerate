@@ -3,7 +3,7 @@ package edu.cornell.cdm89.scalaspec.domain
 import java.io._
 
 import akka.actor.{Actor, ActorLogging, ActorRef, Props}
-import akka.actor.{Address, Deploy}
+import akka.actor.Identify
 import akka.cluster.Cluster
 import akka.remote.RemoteScope
 import scala.collection.mutable
@@ -16,15 +16,16 @@ import edu.cornell.cdm89.scalaspec.pde.LaxFriedrichsFlux.BoundaryValues
 import edu.cornell.cdm89.scalaspec.pde.FluxConservativePde
 import edu.cornell.cdm89.scalaspec.spectral.GllBasis
 
-class Subdomain(dom: DomainInfo, pde: FluxConservativePde) extends Actor
-    with ActorLogging {
+object Subdomain {
+  case class OwnerPolicy(nodeId: Int, numNodes: Int, elemsPerNode: Int)
+}
+
+class Subdomain(dom: DomainInfo, pde: FluxConservativePde,
+    dist: Subdomain.OwnerPolicy) extends Actor with ActorLogging {
   val width = (dom.xR - dom.xL) / dom.nElems
   val basis = GllBasis(dom.order)
+  val boundaries = mutable.Map.empty[Int, ActorRef]
   val elements = mutable.Map.empty[Int, ActorRef]
-  
-  // HACK
-  val elemsOnNode1 = context.system.settings.config.getInt("harvest.elements-per-node")
-  val nodeNum = if (Cluster(context.system).selfAddress.port == Some(2551)) 1 else 2
     
   override def preStart = {
     // TODO: Inject BCs
@@ -49,19 +50,20 @@ class Subdomain(dom: DomainInfo, pde: FluxConservativePde) extends Actor
   def receive = setup1
   
   def setup1: Receive = {
-    case 'CreateElements =>
-      createElements()
+    case GllElement.CreateElements(domainRouter) =>
+      createElements(domainRouter)
       sender ! 'ElementsCreated
-      context.become(setup2(sender))
+      context.become(setup2(sender, emptyResponses))
+    case GllElement.FindBoundary(index, messageId) =>
+      boundaries.get(index) foreach { _ forward Identify(messageId) }
   }
   
-  def setup2(controller: ActorRef): Receive = {
+  def setup2(controller: ActorRef,
+      responses: mutable.Map[ActorRef, Boolean]): Receive = {
     case 'GetCoordsForId =>
       elements.values foreach { _ forward 'GetCoords }
-      context.become(initializing(controller, emptyResponses))
-  }
-  
-  def initializing(controller: ActorRef, responses: mutable.Map[ActorRef, Boolean]): Receive = {
+    case GllElement.FindBoundary(index, messageId) =>
+      boundaries.get(index) foreach { _ forward Identify(messageId) }
     case 'Ready =>
       responses(sender) = true
       if (responses.forall(_._2)) {
@@ -126,36 +128,32 @@ class Subdomain(dom: DomainInfo, pde: FluxConservativePde) extends Actor
   
   private def createBoundaries(leftBc: BoundaryCondition,
       rightBc: BoundaryCondition): Unit = {
-    if (nodeNum == 1) {
-      context.actorOf(Props(classOf[ExternalBoundaryActor],
+    if (dist.nodeId == 1) {
+      boundaries(0) = context.actorOf(Props(classOf[ExternalBoundaryActor],
           dom.xL, leftBc), "boundary0")
-      for (i <- 1 until elemsOnNode1.min(dom.nElems)) {
+    }
+    for (i <- 1 until dom.nElems) {
+      if ((i >= (dist.nodeId-1)*dist.elemsPerNode) &&
+          (i < dist.nodeId*dist.elemsPerNode)) {
         val x = dom.xL + i*width
-        context.actorOf(Props(classOf[InternalBoundaryActor], x), s"boundary$i")
+        boundaries(i) = context.actorOf(Props(classOf[InternalBoundaryActor],
+            x), s"boundary$i")
       }
-      if (dom.nElems < elemsOnNode1) {
-        context.actorOf(Props(classOf[ExternalBoundaryActor],
-            dom.xR, rightBc), s"boundary${dom.nElems}")
-      }
-    } else {
-      for (i <- elemsOnNode1 to dom.nElems-1) {
-        val x = dom.xL + i*width
-        context.actorOf(Props(classOf[InternalBoundaryActor], x), s"boundary$i")
-      }
-      if (dom.nElems >= elemsOnNode1) {
-        context.actorOf(Props(classOf[ExternalBoundaryActor],
-            dom.xR, rightBc), s"boundary${dom.nElems}")
-      }
+    }
+    if ((dom.nElems > (dist.nodeId-1)*dist.elemsPerNode) &&
+          (dom.nElems <= dist.nodeId*dist.elemsPerNode)) {
+      boundaries(dom.nElems) = context.actorOf(Props(classOf[ExternalBoundaryActor],
+          dom.xR, rightBc), s"boundary${dom.nElems}")
     }
   }
   
-  private def createElements(): Unit = {
+  private def createElements(domainRouter: ActorRef): Unit = {
     for (i <- 0 until dom.nElems) {
-      if (((nodeNum == 1) && (i < elemsOnNode1)) ||
-          ((nodeNum == 2) && (i >= elemsOnNode1))) {
+      if ((i >= (dist.nodeId-1)*dist.elemsPerNode) &&
+          (i < dist.nodeId*dist.elemsPerNode)) {
         val x = dom.xL + i*width
         val map = new AffineMap(x, x+width)
-        val elem = context.actorOf(Props(classOf[GllElement], basis, map, pde),
+        val elem = context.actorOf(Props(classOf[GllElement], basis, map, pde, domainRouter),
             s"interval$i")
         elements(i) = elem
       }

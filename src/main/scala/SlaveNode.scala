@@ -23,12 +23,15 @@ object SlaveNode extends App {
   val seedNodes = immutableSeq(config.getStringList(
       "harvest.cluster.seed-nodes")).map {
       case AddressFromURIString(addr) => addr }.toVector
+  val nNodes = config.getInt("akka.cluster.role.compute.min-nr-of-members")
+  val nodeId = Cluster(system).selfAddress.port.get - 2550 // Hack
+  val elemsPerNode = config.getInt("harvest.elements-per-node")
 
   val domInfo = DomainInfo(0.0, 10.0, order, nElems)
   val subdomain = system.actorOf(Props(classOf[Subdomain], domInfo,
-      //new ScalarAdvectionEquation(2.0*math.Pi)),
-      new ScalarWaveEquation),
-      "subdomain")
+      //new ScalarAdvectionEquation(2.0*math.Pi),
+      new ScalarWaveEquation,
+      Subdomain.OwnerPolicy(nodeId, nNodes, elemsPerNode)), "subdomain")
 
   //val idActor = system.actorOf(Props[SineWaveInitialData], "idProvider")
   val idActor = system.actorOf(Props(classOf[TrianglePulseInitialData],

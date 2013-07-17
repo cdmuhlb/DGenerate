@@ -18,10 +18,14 @@ object GllElement {
   case class Coords(x: DenseVector[Double])
   case class Interpolate(t: Double)
   case class Interpolation(state: OdeState, x: DenseVector[Double])
+  case class FindBoundary(index: Int, messageId: Any)
+  case class CreateElements(domain: ActorRef)
 }
 
 class GllElement(basis: GllBasis, map: AffineMap,
-    pde: FluxConservativePde) extends Actor with ActorLogging {
+    pde: FluxConservativePde, domain: ActorRef) extends Actor with ActorLogging {
+  import GllElement._
+  
   val controller = context.parent
   val name = self.path.name
   val coords = basis.nodes map map.mapX
@@ -69,25 +73,9 @@ class GllElement(basis: GllBasis, map: AffineMap,
     // look up boundaries
     assert(name.startsWith("interval"))
     val index = name.substring(8).toInt
-    //context.actorSelection(s"../boundary$index") ! Identify('Left)
-    //context.actorSelection(s"../boundary${index+1}") ! Identify('Right)
-    
-    // HACK
-    val elemsOnNode1 = context.system.settings.config.getInt("harvest.elements-per-node")
-    val nodeNum = if (Cluster(context.system).selfAddress.port == Some(2551)) 1 else 2
-    // Using actorSelection(Address) seems to produce deadLetters instead of None
-    //val node2 = Address("akka.tcp", "Harvest", "127.0.0.1", 2552)
-    val node2 = "akka.tcp://Harvest@127.0.0.1:2552/"
-
-    context.actorSelection(s"../boundary$index") ! Identify('Left)
-    if (((nodeNum == 1) && (index+1 < elemsOnNode1)) || (nodeNum == 2)) {
-      context.actorSelection(s"../boundary${index+1}") ! Identify('Right)
-    } else {
-      context.actorSelection(node2 + s"user/subdomain/boundary${index+1}") ! Identify('Right)
-    }
+    domain ! FindBoundary(index, 'Left)
+    domain ! FindBoundary(index+1, 'Right)
   }
-  
-  import GllElement._
   
   def receive = setup(new SetupTracker)
   
