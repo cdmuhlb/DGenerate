@@ -11,4 +11,3 @@ case class TakeStep(dt: Double, y1: OdeState, k1: FieldVec)
 trait Ode {
   def rhs(state: OdeState)(implicit executor: ExecutionContext): Future[FieldVec]
 }
-

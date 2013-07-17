@@ -5,7 +5,7 @@ import edu.cornell.cdm89.scalaspec.pde.BoundaryCondition
 class RoundRobinGrid(info: DomainInfo, nNodes: Int, leftBc: BoundaryCondition,
     rightBc: BoundaryCondition) extends GridDistribution {
   private val width = (info.xR - info.xL) / info.nElems
-  
+
   override def myExternalBoundaries(nodeId: Int):
       Seq[(Boundary, BoundaryCondition)] = {
     var ans = List.empty[(Boundary, BoundaryCondition)]
@@ -15,7 +15,7 @@ class RoundRobinGrid(info: DomainInfo, nNodes: Int, leftBc: BoundaryCondition,
     }
     ans
   }
-  
+
   override def myInternalBoundaries(nodeId: Int): Seq[Boundary] = {
     val seed = if (nodeId == 0) nNodes else nodeId
     val ans = (seed until info.nElems by nNodes) map { i =>
@@ -24,7 +24,7 @@ class RoundRobinGrid(info: DomainInfo, nNodes: Int, leftBc: BoundaryCondition,
     }
     ans.toList
   }
-  
+
   override def myElements(nodeId: Int): Seq[Element] = {
     val ans = (nodeId until info.nElems by nNodes) map { i =>
       val x = info.xL + i*width

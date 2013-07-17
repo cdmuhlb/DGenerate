@@ -25,39 +25,39 @@ object GllElement {
 class GllElement(basis: GllBasis, map: AffineMap,
     pde: FluxConservativePde, domain: ActorRef) extends Actor with ActorLogging {
   import GllElement._
-  
+
   val controller = context.parent
   val name = self.path.name
   val coords = basis.nodes map map.mapX
   val minDx = (coords.toArray.sliding(2) map {p => p(1) - p(0)}).min
-  
+
   class SetupTracker {
     private var leftBoundary = Option.empty[ActorRef]
     private var rightBoundary = Option.empty[ActorRef]
     private var id = Option.empty[OdeState]
     private var ode = Option.empty[Ode]
-    
+
     def haveLeft(left: ActorRef): Unit = {
       leftBoundary = Some(left)
       checkBoundaries()
     }
-    
+
     def haveRight(right: ActorRef): Unit = {
       rightBoundary = Some(right)
       checkBoundaries()
     }
-    
+
     def haveId(state: OdeState): Unit = {
       id = Some(state)
       checkCompletion()
     }
-    
+
     private def checkBoundaries(): Unit = {
       ode = for (left <- leftBoundary; right <- rightBoundary) yield
           new FluxConservativeMethodOfLines(pde, basis, map.jacobian, left, right)
       checkCompletion()
     }
-    
+
     private def checkCompletion(): Unit = {
       if (ode.nonEmpty) {
         context.become(uninitialized(ode.get))
@@ -76,9 +76,9 @@ class GllElement(basis: GllBasis, map: AffineMap,
     domain ! FindBoundary(index, 'Left)
     domain ! FindBoundary(index+1, 'Right)
   }
-  
+
   def receive = setup(new SetupTracker)
-  
+
   def setup(tracker: SetupTracker): Receive = {
     case ActorIdentity('Left, Some(actor)) =>
       //log.info("Got left")
@@ -95,7 +95,7 @@ class GllElement(basis: GllBasis, map: AffineMap,
       //log.info("Giving early coords")
       sender ! Coords(coords)
   }
-  
+
   def uninitialized(ode: Ode): Receive = {
     case 'GetCoords =>
       //log.info("Giving late coords")
@@ -110,7 +110,7 @@ class GllElement(basis: GllBasis, map: AffineMap,
       controller ! 'Ready
       context.become(initialized(stepper, state, rhs))
   }
-  
+
   def initialized(stepper: ActorRef, state: OdeState, rhs: FieldVec): Receive = {
     case StepTo(t) =>
       stepper ! TakeStep(t - state.t, state, rhs)
@@ -121,7 +121,7 @@ class GllElement(basis: GllBasis, map: AffineMap,
       require(t == state.t)
       sender ! Interpolation(state, coords)
   }
-  
+
   def active(stepper: ActorRef, lastState: OdeState, lastRhs: FieldVec,
       currentState: OdeState, currentRhs: FieldVec): Receive = {
     case StepTo(t) =>

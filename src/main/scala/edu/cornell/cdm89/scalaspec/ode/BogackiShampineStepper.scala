@@ -10,7 +10,7 @@ object BogackiShampineStepper {
   case class Stage3Result(k3: FieldVec)
   case class Stage4Result(state4: OdeState, k4: FieldVec)
   case class ErrorEstimate(err: Double)
-  
+
   def measureError(y: FieldVec, z: FieldVec): Double = {
     val alpha = 1000.0
     val errVec = y.zip(z) map { case (yy, zz) =>
@@ -23,14 +23,14 @@ object BogackiShampineStepper {
 class BogackiShampineStepper(ode: Ode, element: ActorRef, controller: ActorRef) extends Actor {
   import BogackiShampineStepper._
   import edu.cornell.cdm89.scalaspec.domain.GllElement.AdvanceState
-  
+
   // All expensive computations get done in this Actor's thread pool!
   // Consider specifying execution service in ODE's constructor; then this
   // actor's dispatcher will only be used for the callbacks
   import context.dispatcher
-  
+
   def receive = idle
-  
+
   def idle: Receive = {
     case TakeStep(dt, state1, k1) =>
       val t2 = state1.t + 0.5*dt
@@ -68,7 +68,7 @@ class BogackiShampineStepper(ode: Ode, element: ActorRef, controller: ActorRef) 
       k4Future onSuccess { case k4 => self ! Stage4Result(state4, k4) }
       context.become(stage4(dt, state1, k1, k2, k3))
   }
-  
+
   def stage4(dt: Double, state1: OdeState, k1: FieldVec,
       k2: FieldVec, k3: FieldVec): Receive = {
     case Stage4Result(state4, k4) =>

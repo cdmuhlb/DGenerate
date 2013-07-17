@@ -10,7 +10,7 @@ import edu.cornell.cdm89.scalaspec.pde.FluxConservativePde
 import edu.cornell.cdm89.scalaspec.pde.LaxFriedrichsFlux.{BoundaryValues, NumericalFlux}
 import edu.cornell.cdm89.scalaspec.spectral.GllBasis
 
-class FluxConservativeMethodOfLines(pde: FluxConservativePde, basis: GllBasis, 
+class FluxConservativeMethodOfLines(pde: FluxConservativePde, basis: GllBasis,
     jacobian: Double, leftBoundary: ActorRef, rightBoundary: ActorRef) extends Ode {
   val weights = basis.weights
 
@@ -19,7 +19,7 @@ class FluxConservativeMethodOfLines(pde: FluxConservativePde, basis: GllBasis,
     val mySource = pde.source(state)
     val futBvL = onLeftBoundary(state, myFlux)
     val futBvR = onRightBoundary(state, myFlux)
-    
+
     // How long to wait for neighboring domains to respond
     implicit val timeout = Timeout(1.minute)
     val leftFlux = futBvL map { bv => (leftBoundary ? bv).mapTo[NumericalFlux] }
@@ -49,7 +49,7 @@ class FluxConservativeMethodOfLines(pde: FluxConservativePde, basis: GllBasis,
       ans
     }
   }
-  
+
   private def onLeftBoundary(state: OdeState,
       flux: Future[FieldVec])(implicit executor: ExecutionContext): Future[BoundaryValues] = {
     flux map { f =>
@@ -58,7 +58,7 @@ class FluxConservativeMethodOfLines(pde: FluxConservativePde, basis: GllBasis,
       BoundaryValues(state.t, bu, bf, -1.0)
     }
   }
-  
+
   private def onRightBoundary(state: OdeState,
       flux: Future[FieldVec])(implicit executor: ExecutionContext): Future[BoundaryValues] = {
     flux map { f =>

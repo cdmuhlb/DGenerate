@@ -44,7 +44,7 @@ object Main extends App {
   val nNodes = config.getInt("akka.cluster.role.compute.min-nr-of-members")
   val nodeId = Cluster(system).selfAddress.port.get - 2552 // Hack
   require((nodeId >= 0) && (nodeId < nNodes))
-  
+
   // Boundary conditions
   val nVars = 3
     val leftBc = new BoundaryCondition {
@@ -84,7 +84,7 @@ object Main extends App {
     Cluster(system).registerOnMemberUp {
       println(s"Cluster is UP")
       val inbox = Inbox.create(system)
-    
+
       def waitForResponses(response: Any): Unit = {
         var count = 0
         while (count < nNodes) {

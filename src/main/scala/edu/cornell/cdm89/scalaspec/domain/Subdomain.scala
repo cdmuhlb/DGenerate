@@ -18,13 +18,13 @@ class Subdomain(grid: GridDistribution, pde: FluxConservativePde,
     nodeId: Int) extends Actor with ActorLogging {
   val boundaries = mutable.Map.empty[Int, ActorRef]
   val elements = mutable.Map.empty[Int, ActorRef]
-    
+
   override def preStart = {
     createBoundaries()
   }
-  
+
   def receive = setup1
-  
+
   def setup1: Receive = {
     case GllElement.CreateElements(domainRouter) =>
       createElements(domainRouter)
@@ -33,7 +33,7 @@ class Subdomain(grid: GridDistribution, pde: FluxConservativePde,
     case GllElement.FindBoundary(index, messageId) =>
       boundaries.get(index) foreach { _ forward Identify(messageId) }
   }
-  
+
   def setup2(controller: ActorRef,
       responses: mutable.Map[ActorRef, Boolean]): Receive = {
     case 'GetCoordsForId =>
@@ -47,7 +47,7 @@ class Subdomain(grid: GridDistribution, pde: FluxConservativePde,
         context.become(ready)
       }
   }
-  
+
   def ready: Receive = {
     case step: GllElement.StepTo =>
       //log.info("Stepping")
@@ -58,7 +58,7 @@ class Subdomain(grid: GridDistribution, pde: FluxConservativePde,
       elements.values foreach { _ ! interp }
       context.become(observing(sender, emptyResponses))
   }
-  
+
   def stepping(controller: ActorRef, responses: mutable.Map[ActorRef, Boolean]): Receive = {
     case 'Advanced =>
       responses(sender) = true
@@ -68,7 +68,7 @@ class Subdomain(grid: GridDistribution, pde: FluxConservativePde,
       }
     case ErrorEstimate(err) => ;
   }
-  
+
   def observing(controller: ActorRef, responses: mutable.Map[ActorRef, Boolean]): Receive = {
     case GllElement.Interpolation(state, x) =>
       responses(sender) = true
@@ -79,13 +79,13 @@ class Subdomain(grid: GridDistribution, pde: FluxConservativePde,
         context.become(ready)
       }
   }
-  
+
   def emptyResponses: mutable.Map[ActorRef, Boolean] = {
     val responses = mutable.Map.empty[ActorRef, Boolean]
     elements.values foreach { responses(_) = false }
     responses
   }
-  
+
   def printState(name: String, state: OdeState, x: DenseVector[Double]): Unit = {
     val filename = "/tmp/harvest/" + name + ".yg"
     val out = new PrintWriter(new FileWriter(filename, true))
@@ -101,7 +101,7 @@ class Subdomain(grid: GridDistribution, pde: FluxConservativePde,
     out.println
     out.close()
   }
-  
+
   private def createBoundaries(): Unit = {
     for ((b, bc) <- grid.myExternalBoundaries(nodeId)) {
       boundaries(b.index) = context.actorOf(Props(classOf[ExternalBoundaryActor],
@@ -112,7 +112,7 @@ class Subdomain(grid: GridDistribution, pde: FluxConservativePde,
             b.x), s"boundary${b.index}")
     }
   }
-  
+
   private def createElements(domainRouter: ActorRef): Unit = {
     val bases = mutable.Map.empty[Int, GllBasis]
     for (e <- grid.myElements(nodeId)) {

@@ -16,7 +16,7 @@ class ContiguousGrid(info: DomainInfo, nNodes: Int, leftBc: BoundaryCondition,
     }
     ans
   }
-  
+
   override def myInternalBoundaries(nodeId: Int): Seq[Boundary] = {
     val seed = if (nodeId == 0) 1 else nodeId*elemsPerNode
     val ans = (seed until ((nodeId+1)*elemsPerNode).min(info.nElems)) map { i =>
@@ -25,9 +25,9 @@ class ContiguousGrid(info: DomainInfo, nNodes: Int, leftBc: BoundaryCondition,
     }
     ans.toList
   }
-  
+
   override def myElements(nodeId: Int): Seq[Element] = {
-    val ans = (nodeId*elemsPerNode until 
+    val ans = (nodeId*elemsPerNode until
         ((nodeId+1)*elemsPerNode).min(info.nElems)) map { i =>
       val x = info.xL + i*width
       Element(info.order, x, x+width, i)
