@@ -13,6 +13,8 @@ import edu.cornell.cdm89.scalaspec.pde.BoundaryCondition
 import edu.cornell.cdm89.scalaspec.pde.LaxFriedrichsFlux.BoundaryValues
 import edu.cornell.cdm89.scalaspec.ode.OdeState
 import edu.cornell.cdm89.scalaspec.pde.{ScalarWaveEquation, ScalarAdvectionEquation}
+import edu.cornell.cdm89.scalaspec.pde.{SineBoundary, AdvectionOutflowBoundary, AdvectionConstantBoundary}
+import edu.cornell.cdm89.scalaspec.pde.{WaveOutflowBoundary, WaveInversionBoundary, WaveReflectionBoundary}
 import edu.cornell.cdm89.scalaspec.pde.{SineWaveInitialData, TrianglePulseInitialData}
 
 object Main extends App {
@@ -45,33 +47,27 @@ object Main extends App {
   val nodeId = Cluster(system).selfAddress.port.get - 2552 // Hack
   require((nodeId >= 0) && (nodeId < nNodes))
 
+  // PDE
+  //val a = 2.0*math.Pi
+  //val pde = new ScalarAdvectionEquation(a)
+  val pde = new ScalarWaveEquation
+
   // Boundary conditions
-  val nVars = 3
-    val leftBc = new BoundaryCondition {
-      def boundaryValues(t: Double, x: Double) = {
-        //val a = 2.0*math.Pi
-        //val u = math.sin(x - a*t)
-        BoundaryValues(t,
-            Vector.fill[Double](nVars)(0.0), Vector.fill[Double](nVars)(0.0), 1.0)
-            //Vector.fill[Double](nVars)(u), Vector.fill[Double](nVars)(a*u), 1.0)
-      }
-    }
-    val rightBc = new BoundaryCondition {
-      def boundaryValues(t: Double, x: Double) = BoundaryValues(t,
-          Vector.fill[Double](nVars)(0.0), Vector.fill[Double](nVars)(0.0), -1.0)
-    }
+  //val leftBc = new SineBoundary(a, 1.0)
+  //val rightBc = new OutflowBoundary(-1.0)
+  val leftBc = new WaveOutflowBoundary(1.0)
+  val rightBc = new WaveOutflowBoundary(-1.0)
 
   // Create domain
   val domInfo = DomainInfo(0.0, 10.0, order, nElems)
   //val grid = new ContiguousGrid(domInfo, nNodes, leftBc, rightBc)
   val grid = new RoundRobinGrid(domInfo, nNodes, leftBc, rightBc)
   val subdomain = system.actorOf(Props(classOf[Subdomain], grid,
-      //new ScalarAdvectionEquation(2.0*math.Pi),
-      new ScalarWaveEquation,
-      nodeId), "subdomain")
+      pde, nodeId), "subdomain")
 
   // Establish initial data
-  //val idActor = system.actorOf(Props[SineWaveInitialData], "idProvider")
+  //val idActor = system.actorOf(Props(classOf[SineWaveInitialData], subdomain),
+  //    "idProvider")
   val idActor = system.actorOf(Props(classOf[TrianglePulseInitialData],
       subdomain, 5.0, 0.5, 1.0), "idProvider")
 

@@ -55,7 +55,7 @@ class FluxConservativeMethodOfLines(pde: FluxConservativePde, basis: GllBasis,
     flux map { f =>
       val bu = state.u.map { ui => ui(0) }
       val bf = f.map{ fi => fi(0) }
-      BoundaryValues(state.t, bu, bf, -1.0)
+      BoundaryValues(state.t, bu, bf, pde.maxLambda(state.t, bu), -1.0)
     }
   }
 
@@ -64,7 +64,7 @@ class FluxConservativeMethodOfLines(pde: FluxConservativePde, basis: GllBasis,
     flux map { f =>
       val bu = state.u.map { ui => ui(ui.length-1) }
       val bf = f.map{ fi => fi(fi.length-1) }
-      BoundaryValues(state.t, bu, bf, 1.0)
+      BoundaryValues(state.t, bu, bf, pde.maxLambda(state.t, bu), 1.0)
     }
   }
 }

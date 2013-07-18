@@ -3,7 +3,7 @@ package edu.cornell.cdm89.scalaspec.pde
 import scala.concurrent.{ExecutionContext, Future, future}
 import breeze.linalg.DenseVector
 
-import edu.cornell.cdm89.scalaspec.ode.{OdeState, FieldVec}
+import edu.cornell.cdm89.scalaspec.ode.{OdeState, FieldVec, PointVec}
 
 class ScalarAdvectionEquation(a: Double) extends FluxConservativePde {
   override def flux(u: OdeState)(implicit executor: ExecutionContext): Future[FieldVec] = future {
@@ -13,4 +13,6 @@ class ScalarAdvectionEquation(a: Double) extends FluxConservativePde {
   override def source(u: OdeState)(implicit executor: ExecutionContext): Future[FieldVec] = future {
     Vector(DenseVector.zeros[Double](u.u(0).length))
   }
+  
+  override def maxLambda(t: Double, u: PointVec): Double = a
 }

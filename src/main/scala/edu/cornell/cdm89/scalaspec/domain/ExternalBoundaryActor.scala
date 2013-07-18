@@ -11,7 +11,7 @@ class ExternalBoundaryActor(x: Double, bc: BoundaryCondition) extends Actor with
 
   def receive = {
     case bv1: BoundaryValues =>
-      val bv2 = bc.boundaryValues(bv1.t, x)
+      val bv2 = bc.boundaryValues(bv1.t, x, bv1)
       val flux = LaxFriedrichsFlux.flux(bv1, bv2)
       sender ! flux
   }
