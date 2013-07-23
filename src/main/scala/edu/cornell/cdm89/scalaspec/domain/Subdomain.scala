@@ -55,13 +55,25 @@ class Subdomain(grid: GridDistribution, pde: FluxConservativePde,
       responses(sender) = true
       if (responses.forall(_._2)) {
         controller ! 'AllReady
-        context.become(ready)
+        context.become(ready(controller, emptyResponses))
       }
   }
 
-  def ready: Receive = {
+  def ready(controller: ActorRef,
+      responses: mutable.Map[ActorRef, Boolean]): Receive = {
     case 'GetStepper =>
       elements.values foreach { _ forward 'GetStepper }
+    case 'DoneStepping =>
+      responses(sender) = true
+      if (responses.forall(_._2)) {
+        controller ! 'AllDone
+        context.become(finished)
+      }
+  }
+
+  def finished: Receive = {
+    case 'Shutdown =>
+      context.system.shutdown()
   }
 
   def emptyResponses: mutable.Map[ActorRef, Boolean] = {

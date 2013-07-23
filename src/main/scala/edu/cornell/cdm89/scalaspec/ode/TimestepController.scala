@@ -25,5 +25,6 @@ class TimestepController(domain: ActorRef, t0: Double, dt: Double, tf: Double)
     case ErrorMeasurement(t, err) =>
       sender ! 'StepApproved
       if (t < tf) sender ! TakeStep(dt)
+      else sender ! 'DoneStepping
   }
 }

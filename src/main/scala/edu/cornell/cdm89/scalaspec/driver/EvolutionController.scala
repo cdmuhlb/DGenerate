@@ -22,34 +22,48 @@ class EvolutionController(nNodes: Int) extends Actor with ActorLogging {
   val idRouter = context.system.actorOf(Props.empty.withRouter(FromConfig), "initialData")
 
   override def receive = standby
-  
+
   def standby: Receive = {
     case 'StartEvolution =>
       domRouter ! GllElement.CreateElements(domRouter)
       context.become(creatingElements)
   }
-  
+
   def creatingElements: Receive = {
     waitForResponses(0, 'ElementsCreated, () => idRouter ! 'ProvideId, loadingId)
   }
-  
+
   def loadingId: Receive = {
     waitForResponses(0, 'AllReady, () => {
-      context.actorOf(Props(classOf[TimestepController], domRouter, t0, dt, t0+dt*nSteps), "timeStepper")
-        }, timestep(0)) 
+        log.info("Starting evolution")
+        context.actorOf(Props(classOf[TimestepController], domRouter,
+            t0, dt, t0+dt*nSteps), "timeStepper")
+      }, stepping(System.nanoTime))
   }
-  
-  def timestep(i: Int): Receive = {
+
+  def stepping(timestamp: Long): Receive = {
+    waitForResponses(0, 'AllDone, () => {
+        val wallTime = 1.0e-9 * (System.nanoTime - timestamp)
+        log.info(f"All done! ($wallTime%.3f s)")
+        Thread.sleep(30000) // Blocking in receive!
+        domRouter ! 'Shutdown
+      }, finished)
+  }
+
+  def finished: Receive = {
     case msg =>
       log.error(s"Unexpected message: $msg")
   }
-  
+
   def waitForResponses(count: Int, response: Any, action: () => Unit,
       nextState: Receive): Receive = {
     case `response` =>
+      //log.info(s"Got response $response (${count+1})")
       if (count+1 == nNodes) {
         action()
         context.become(nextState)
       } else context.become(waitForResponses(count+1, response, action, nextState))
+    case msg =>
+      log.error(s"Unexpected message: $msg")
   }
 }

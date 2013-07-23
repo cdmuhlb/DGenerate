@@ -133,5 +133,7 @@ class GllElement(basis: GllBasis, map: AffineMap,
       observer ! StateChanged(name, coords, chunk)
       //log.info(s"Stepped to ${chunk.currentState.t}")
       context.become(active(chunk))
+    case 'DoneStepping =>
+      controller ! 'DoneStepping
   }
 }

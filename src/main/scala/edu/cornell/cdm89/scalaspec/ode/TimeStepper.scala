@@ -30,6 +30,8 @@ class TimeStepper(ode: Ode) extends Actor {
     case TimestepController.TakeStep(dt) =>
       tsWorker ! BogackiShampineStepper.TakeStep(dt, state, rhs)
       context.become(stepping(sender))
+    case 'DoneStepping =>
+      element ! 'DoneStepping
   }
 
   def stepping(controller: ActorRef): Receive = {
