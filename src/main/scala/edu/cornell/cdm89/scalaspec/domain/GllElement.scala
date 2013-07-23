@@ -1,25 +1,31 @@
 package edu.cornell.cdm89.scalaspec.domain
 
+import scala.concurrent.duration._
 import akka.actor.{Actor, ActorLogging, ActorRef, Props}
 import akka.actor.{Address, ActorIdentity, Identify}
 import akka.cluster.Cluster
+import akka.pattern.ask
+import akka.util.Timeout
 import breeze.linalg.DenseVector
 
 import edu.cornell.cdm89.scalaspec.spectral.GllBasis
-import edu.cornell.cdm89.scalaspec.ode.{Ode, OdeState, TakeStep, FieldVec, BogackiShampineStepper}
+import edu.cornell.cdm89.scalaspec.ode.{Ode, OdeState, FieldVec}
+import edu.cornell.cdm89.scalaspec.ode.{TimeStepper, BogackiShampineStepper, TimestepController}
 import edu.cornell.cdm89.scalaspec.ode.FluxConservativeMethodOfLines
 import edu.cornell.cdm89.scalaspec.pde.FluxConservativePde
+import edu.cornell.cdm89.scalaspec.ode.TimeStepper.{InitializeState, TimeChunk}
 
 object GllElement {
   case class InitialData(state: OdeState)
   case class StepTo(t: Double)
-  case class AdvanceState(newState: OdeState, rhs: FieldVec)
+  case class AdvanceState(chunk: TimeChunk)
   case class RhsResult(state: OdeState, rhs: FieldVec)
   case class Coords(x: DenseVector[Double])
-  case class Interpolate(t: Double)
-  case class Interpolation(state: OdeState, x: DenseVector[Double])
   case class FindBoundary(index: Int, messageId: Any)
   case class CreateElements(domain: ActorRef)
+  case class SetObserver(obs: ActorRef)
+  case class StateChanged(name: String, coords: DenseVector[Double], chunk: TimeChunk)
+  case class HaveTimeStepper(stepper: ActorRef)
 }
 
 class GllElement(basis: GllBasis, map: AffineMap,
@@ -30,6 +36,9 @@ class GllElement(basis: GllBasis, map: AffineMap,
   val name = self.path.name
   val coords = basis.nodes map map.mapX
   val minDx = (coords.toArray.sliding(2) map {p => p(1) - p(0)}).min
+  
+  var stepper = context.system.deadLetters
+  var observer = context.system.deadLetters
 
   class SetupTracker {
     private var leftBoundary = Option.empty[ActorRef]
@@ -69,7 +78,6 @@ class GllElement(basis: GllBasis, map: AffineMap,
   }
 
   override def preStart = {
-    //log.info(s"Starting element '$name' of order ${basis.order}")
     // look up boundaries
     assert(name.startsWith("interval"))
     val index = name.substring(8).toInt
@@ -81,58 +89,49 @@ class GllElement(basis: GllBasis, map: AffineMap,
 
   def setup(tracker: SetupTracker): Receive = {
     case ActorIdentity('Left, Some(actor)) =>
-      //log.info("Got left")
       tracker.haveLeft(actor)
     case ActorIdentity('Right, Some(actor)) =>
-      //log.info("Got right")
       tracker.haveRight(actor)
     case ActorIdentity(lr, None) =>
-      //log.error(s"No actor for boundary at $lr")
+      log.error(s"Could not find $lr boundary for element $name")
     case InitialData(state) =>
-      //log.info("Got early ID")
       tracker.haveId(state)
     case 'GetCoords =>
-      //log.info("Giving early coords")
       sender ! Coords(coords)
   }
 
   def uninitialized(ode: Ode): Receive = {
     case 'GetCoords =>
-      //log.info("Giving late coords")
       sender ! Coords(coords)
     case InitialData(state) =>
-      //log.info("Got late ID")
       import context.dispatcher
       ode.rhs(state) onSuccess { case rhs => self ! RhsResult(state, rhs) }
     case RhsResult(state, rhs) =>
-      //log.info("Got RHS")
-      val stepper = context.system.actorOf(Props(classOf[BogackiShampineStepper], ode, self, controller))
-      controller ! 'Ready
-      context.become(initialized(stepper, state, rhs))
+      stepper = context.actorOf(Props(classOf[TimeStepper], ode))
+      // TODO: I don't like this pattern
+      import context.dispatcher
+      implicit val timeout = Timeout(1.minute)
+      (stepper ? InitializeState(state, rhs)) onSuccess { case 'Initialized =>
+        controller ! 'Ready }
+      context.become(initialized(state, rhs))
   }
 
-  def initialized(stepper: ActorRef, state: OdeState, rhs: FieldVec): Receive = {
-    case StepTo(t) =>
-      stepper ! TakeStep(t - state.t, state, rhs)
-    case AdvanceState(newState, newRhs) =>
-      controller ! 'Advanced
-      context.become(active(stepper, state, rhs, newState, newRhs))
-    case Interpolate(t) =>
-      require(t == state.t)
-      sender ! Interpolation(state, coords)
+  def initialized(state: OdeState, rhs: FieldVec): Receive = {
+    case 'GetStepper => sender ! HaveTimeStepper(stepper)
+    case SetObserver(obs) =>
+      observer = obs
+      sender ! 'Ack
+    case AdvanceState(chunk) =>
+      require(chunk.lastState.t == state.t)
+      observer ! StateChanged(name, coords, chunk)
+      context.become(active(chunk))
   }
 
-  def active(stepper: ActorRef, lastState: OdeState, lastRhs: FieldVec,
-      currentState: OdeState, currentRhs: FieldVec): Receive = {
-    case StepTo(t) =>
-      stepper ! TakeStep(t - currentState.t, currentState, currentRhs)
-    case AdvanceState(newState, newRhs) =>
-      controller ! 'Advanced
-      context.become(active(stepper, currentState, currentRhs, newState, newRhs))
-    case Interpolate(t) =>
-      require(t >= lastState.t && t <= currentState.t)
-      if (t == lastState.t) sender ! Interpolation(lastState, coords)
-      else if (t == currentState.t) sender ! Interpolation(currentState, coords)
-      else sender ! 'NYI
+  def active(state: TimeChunk): Receive = {
+    case AdvanceState(chunk) =>
+      require(chunk.lastState.t == state.currentState.t)
+      observer ! StateChanged(name, coords, chunk)
+      //log.info(s"Stepped to ${chunk.currentState.t}")
+      context.become(active(chunk))
   }
 }

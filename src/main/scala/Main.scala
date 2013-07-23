@@ -16,6 +16,7 @@ import edu.cornell.cdm89.scalaspec.pde.{ScalarWaveEquation, ScalarAdvectionEquat
 import edu.cornell.cdm89.scalaspec.pde.{SineBoundary, AdvectionOutflowBoundary, AdvectionConstantBoundary}
 import edu.cornell.cdm89.scalaspec.pde.{WaveOutflowBoundary, WaveInversionBoundary, WaveReflectionBoundary}
 import edu.cornell.cdm89.scalaspec.pde.{SineWaveInitialData, TrianglePulseInitialData}
+import edu.cornell.cdm89.scalaspec.driver.EvolutionController
 
 object Main extends App {
   val config = {
@@ -38,9 +39,9 @@ object Main extends App {
   val seedNodes = immutableSeq(config.getStringList(
       "harvest.cluster.seed-nodes")).map {
       case AddressFromURIString(addr) => addr }.toVector
-  val t0 = config.getDouble("harvest.initial-time")
-  val dt = config.getDouble("harvest.step-size")
-  val nSteps = config.getInt("harvest.nr-of-steps")
+  //val t0 = config.getDouble("harvest.initial-time")
+  //val dt = config.getDouble("harvest.step-size")
+  //val nSteps = config.getInt("harvest.nr-of-steps")
   val obsFreq = config.getInt("harvest.steps-per-obs")
   val doObserve = config.getBoolean("harvest.observe-solution")
   val nNodes = config.getInt("akka.cluster.role.compute.min-nr-of-members")
@@ -74,11 +75,12 @@ object Main extends App {
   Cluster(system).joinSeedNodes(seedNodes)
 
   if (nodeId == 0) {
-    val domRouter = system.actorOf(Props.empty.withRouter(FromConfig), "domain")
-    val idRouter = system.actorOf(Props.empty.withRouter(FromConfig), "initialData")
+//    val domRouter = system.actorOf(Props.empty.withRouter(FromConfig), "domain")
+//    val idRouter = system.actorOf(Props.empty.withRouter(FromConfig), "initialData")
 
     Cluster(system).registerOnMemberUp {
       println(s"Cluster is UP")
+/*
       val inbox = Inbox.create(system)
 
       def waitForResponses(response: Any): Unit = {
@@ -100,6 +102,10 @@ object Main extends App {
       inbox.send(idRouter, 'ProvideId)
       waitForResponses('AllReady)
 
+*/
+      val control = system.actorOf(Props(classOf[EvolutionController], nNodes), "driver")
+      control ! 'StartEvolution
+
       /* println("Warming up")
       for (i <- 1 to 500) {
         val ti = dt*i
@@ -107,7 +113,7 @@ object Main extends App {
         waitForResponses('AllAdvanced)
       }
       System.gc() */
-
+/*
       // Observe at t0
       if (doObserve) {
         println("Observing t0")
@@ -137,6 +143,7 @@ object Main extends App {
       println(f"Computation time: $runtime%.3f s")
 
       system.shutdown()
+*/
     }
   }
 
