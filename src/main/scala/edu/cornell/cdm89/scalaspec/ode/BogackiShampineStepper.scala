@@ -20,6 +20,25 @@ object BogackiShampineStepper {
     }
     errVec.max
   }
+
+  case class RK3TimeChunk(lastState: OdeState, lastRhs: FieldVec,
+      currentState: OdeState, currentRhs: FieldVec) extends TimeStepper.TimeChunk {
+    def interpolate(t: Double): OdeState = {
+      require((t >= lastState.t) && (t <= currentState.t))
+      if (t == lastState.t) lastState
+      else if (t == currentState.t) currentState
+      else {
+        val h = currentState.t - lastState.t
+        val s = (t - lastState.t)/h
+        val u = lastState.u.zip(lastRhs.zip(currentState.u.zip(
+            currentRhs))) map { case (y0, (f0, (y1, f1))) =>
+          (y0:*(1.0 - s)) + (y1:*s) + ((((y1 - y0):*(1.0 - 2.0*s)) +
+          (f0:*(h*(s-1.0))) + (f1:*(h*s))):*(s*(s-1.0)))
+        }
+        OdeState(t, u)
+      }
+    }
+  }
 }
 
 class BogackiShampineStepper(ode: Ode) extends Actor {
@@ -81,7 +100,7 @@ class BogackiShampineStepper(ode: Ode) extends Actor {
           (kk4:*(dt/8.0))
       }
       val err = measureError(state4.u, z4)
-      controller ! StepResult(TimeStepper.TimeChunk(state1, k1, state4, k4), err)
+      controller ! StepResult(RK3TimeChunk(state1, k1, state4, k4), err)
       context.become(idle)
   }
 

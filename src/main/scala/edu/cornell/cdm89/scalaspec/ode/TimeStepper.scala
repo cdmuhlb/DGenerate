@@ -4,14 +4,23 @@ import akka.actor.{Actor, ActorRef, Props}
 
 object TimeStepper {
   case class InitializeState(state: OdeState, rhs: FieldVec)
-  case class TimeChunk(lastState: OdeState, lastRhs: FieldVec,
-    currentState: OdeState, currentRhs: FieldVec)
+
+  trait TimeChunk {
+    def lastState: OdeState
+    def lastRhs: FieldVec
+    def currentState: OdeState
+    def currentRhs: FieldVec
+    def interpolate(t: Double): OdeState
+
+    def lastTime: Double = lastState.t
+    def currentTime: Double = currentState.t
+  }
 }
 
 class TimeStepper(ode: Ode) extends Actor {
   import TimeStepper._
   import edu.cornell.cdm89.scalaspec.domain.GllElement.AdvanceState
-  
+
   var tsWorker = context.system.deadLetters
   val element = context.parent
 
