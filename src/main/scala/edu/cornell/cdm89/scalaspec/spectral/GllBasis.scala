@@ -13,6 +13,30 @@ case class GllBasis(order: Int) {
   
   //def d1Matrix = myD1.copy
   def differentiate(u: DenseVector[Double]) = myD1*u
+
+  def interpolationMatrix(x: DenseVector[Double]):DenseMatrix[Double] = {
+    val ans = DenseMatrix.zeros[Double](x.length, order+1)
+    for (row <- 0 until x.length) {
+      assert((x(row) >= -1.0) && (x(row) <= 1.0))
+      // from SpEC:Utils/Math/InterpolationWeights.cpp
+      var c1 = 1.0
+      var c4 = myNodes(0) - x(row)
+      ans(row, 0) = 1.0
+      for (i <- 1 to order) {
+        var c2 = 1.0
+        val c5 = c4
+        c4 = myNodes(i) - x(row)
+        for (j <- 0 until i) {
+          val c3 = myNodes(i) - myNodes(j)
+          c2 *= c3
+          if (j == i-1) ans(row, i) = -c1*c5*ans(row, i-1)/c2
+          ans(row, j) = c4*ans(row, j)/c3
+        }
+        c1 = c2
+      }
+    }
+    ans
+  }
   
   private lazy val myNodes = {
     val ans = DenseVector.zeros[Double](order+1)

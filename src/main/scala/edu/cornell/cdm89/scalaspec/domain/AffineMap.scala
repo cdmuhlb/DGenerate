@@ -5,4 +5,5 @@ class AffineMap(xL: Double, xR: Double) {
   val jacobian = 0.5*width
 
   def mapX(xTopo: Double): Double = (xTopo + 1.0)*jacobian + xL
+  def inverseMapX(xCoord: Double): Double = (xCoord - xL)/jacobian - 1.0
 }
