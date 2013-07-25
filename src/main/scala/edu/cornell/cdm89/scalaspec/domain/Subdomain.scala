@@ -2,11 +2,11 @@ package edu.cornell.cdm89.scalaspec.domain
 
 import java.io._
 
+import scala.collection.{mutable, immutable}
 import akka.actor.{Actor, ActorLogging, ActorRef, Props}
 import akka.actor.Identify
 import akka.cluster.Cluster
 import akka.remote.RemoteScope
-import scala.collection.mutable
 import breeze.linalg.DenseVector
 
 import edu.cornell.cdm89.scalaspec.ode.OdeState
@@ -16,6 +16,7 @@ import edu.cornell.cdm89.scalaspec.driver.{YgraphObserver, YgraphInterpObserver}
 
 object Subdomain {
   case class FindRemoteBoundary(index: Int, messageId: Any)
+  case class ElementsList(elements: immutable.Seq[ActorRef])
 }
 
 class Subdomain(grid: GridDistribution, pde: FluxConservativePde,
@@ -43,8 +44,9 @@ class Subdomain(grid: GridDistribution, pde: FluxConservativePde,
 
   def setup2(controller: ActorRef, domainRouter: ActorRef,
       responses: mutable.Map[ActorRef, Boolean]): Receive = {
-    case 'GetCoordsForId =>
-      elements.values foreach { _ forward 'GetCoords }
+    case 'GetLocalElements =>
+      // TODO: Subscribe to changes
+      sender ! Subdomain.ElementsList(elements.values.toList)
     case GllElement.FindBoundary(index, messageId) =>
       if (boundaries.contains(index)) boundaries(index) forward Identify(messageId)
       else domainRouter forward Subdomain.FindRemoteBoundary(index, messageId)

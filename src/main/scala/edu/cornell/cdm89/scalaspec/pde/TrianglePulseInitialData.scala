@@ -4,15 +4,23 @@ import akka.actor.{Actor, ActorLogging, ActorRef}
 import breeze.linalg.DenseVector
 
 import edu.cornell.cdm89.scalaspec.domain.GllElement.{Coords, InitialData}
+import edu.cornell.cdm89.scalaspec.domain.Subdomain
 import edu.cornell.cdm89.scalaspec.ode.OdeState
 import edu.cornell.cdm89.scalaspec.spectral.GllBasis
 
 class TrianglePulseInitialData(subdomain: ActorRef, center: Double,
     halfWidth: Double, height: Double) extends Actor with ActorLogging {
+  // TODO: Refactor into base class
   def receive = {
     case 'ProvideId =>
-      //log.info("ID asking for coords")
-      subdomain ! 'GetCoordsForId
+      subdomain ! 'GetLocalElements
+    case Subdomain.ElementsList(elements) =>
+      elements foreach { _ ! 'GetCoords }
+      context.become(idProvider(elements))
+  }
+
+  def idProvider(elements: Seq[ActorRef]): Receive = {
+    // TODO: Count responses
     case Coords(xs) =>
       //log.info("ID received coords")
       val t0 = 0.0
