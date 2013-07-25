@@ -29,10 +29,11 @@ object GllElement {
 }
 
 class GllElement(basis: GllBasis, map: AffineMap,
-    pde: FluxConservativePde, domain: ActorRef) extends Actor with ActorLogging {
+    pde: FluxConservativePde) extends Actor with ActorLogging {
   import GllElement._
 
   val controller = context.parent
+  val subdomain = context.parent
   val name = self.path.name
   val coords = basis.nodes map map.mapX
   val minDx = (coords.toArray.sliding(2) map {p => p(1) - p(0)}).min
@@ -81,8 +82,8 @@ class GllElement(basis: GllBasis, map: AffineMap,
     // look up boundaries
     assert(name.startsWith("interval"))
     val index = name.substring(8).toInt
-    domain ! FindBoundary(index, 'Left)
-    domain ! FindBoundary(index+1, 'Right)
+    subdomain ! FindBoundary(index, 'Left)
+    subdomain ! FindBoundary(index+1, 'Right)
   }
 
   def receive = setup(new SetupTracker)

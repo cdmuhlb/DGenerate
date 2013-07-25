@@ -12,13 +12,19 @@ import breeze.linalg.DenseVector
 import edu.cornell.cdm89.scalaspec.ode.OdeState
 import edu.cornell.cdm89.scalaspec.pde.FluxConservativePde
 import edu.cornell.cdm89.scalaspec.spectral.GllBasis
-import edu.cornell.cdm89.scalaspec.driver.YgraphObserver
+import edu.cornell.cdm89.scalaspec.driver.{YgraphObserver, YgraphInterpObserver}
+
+object Subdomain {
+  case class FindRemoteBoundary(index: Int, messageId: Any)
+}
 
 class Subdomain(grid: GridDistribution, pde: FluxConservativePde,
     nodeId: Int) extends Actor with ActorLogging {
   val boundaries = mutable.Map.empty[Int, ActorRef]
   val elements = mutable.Map.empty[Int, ActorRef]
+  // TODO: Read Observer parameters from config
   val obs = context.actorOf(Props(classOf[YgraphObserver], 0.1), "obs")
+  //val obs = context.actorOf(Props(classOf[YgraphInterpObserver], 0.1, 0.025), "obs")
 
   override def preStart = {
     createBoundaries()
@@ -30,16 +36,19 @@ class Subdomain(grid: GridDistribution, pde: FluxConservativePde,
     case GllElement.CreateElements(domainRouter) =>
       createElements(domainRouter)
       sender ! 'ElementsCreated
-      context.become(setup2(sender, emptyResponses))
-    case GllElement.FindBoundary(index, messageId) =>
+      context.become(setup2(sender, domainRouter, emptyResponses))
+    case Subdomain.FindRemoteBoundary(index, messageId) =>
       boundaries.get(index) foreach { _ forward Identify(messageId) }
   }
 
-  def setup2(controller: ActorRef,
+  def setup2(controller: ActorRef, domainRouter: ActorRef,
       responses: mutable.Map[ActorRef, Boolean]): Receive = {
     case 'GetCoordsForId =>
       elements.values foreach { _ forward 'GetCoords }
     case GllElement.FindBoundary(index, messageId) =>
+      if (boundaries.contains(index)) boundaries(index) forward Identify(messageId)
+      else domainRouter forward Subdomain.FindRemoteBoundary(index, messageId)
+    case Subdomain.FindRemoteBoundary(index, messageId) =>
       boundaries.get(index) foreach { _ forward Identify(messageId) }
     case 'Ready =>
       responses(sender) = true
@@ -99,7 +108,7 @@ class Subdomain(grid: GridDistribution, pde: FluxConservativePde,
       val map = new AffineMap(e.xL, e.xR)
       val basis = bases.getOrElseUpdate(e.order, GllBasis(e.order))
       elements(e.index) = context.actorOf(Props(classOf[GllElement],
-          basis, map, pde, domainRouter), s"interval${e.index}")
+          basis, map, pde), s"interval${e.index}")
     }
   }
 }
