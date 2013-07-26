@@ -2,11 +2,12 @@ package edu.cornell.cdm89.scalaspec.driver
 
 import java.io._
 
+import scala.collection.immutable.SortedMap
 import scala.collection.mutable
-import akka.actor.Actor
+import akka.actor.{Actor, ActorRef, ActorLogging}
 import breeze.linalg.{DenseMatrix, DenseVector}
 
-import edu.cornell.cdm89.scalaspec.domain.{AffineMap, GllElement}
+import edu.cornell.cdm89.scalaspec.domain.{AffineMap, GllElement, Subdomain}
 import edu.cornell.cdm89.scalaspec.ode.OdeState
 import edu.cornell.cdm89.scalaspec.ode.TimeStepper.TimeChunk
 import edu.cornell.cdm89.scalaspec.spectral.GllBasis
@@ -35,8 +36,9 @@ class YgraphObserver(dt: Double) extends Actor {
   }
 }
 
-class YgraphInterpObserver(dt: Double, dx: Double) extends Actor {
+class YgraphInterpObserver(dt: Double, dx: Double, nodeId: Int) extends Actor with ActorLogging {
   val interpolators = mutable.Map.empty[(Int, Int), DenseMatrix[Double]]
+  val subdomain = context.parent
 
   private def xInterp(xL: Double, xR: Double) = {
     val map = new AffineMap(xL, xR)
@@ -52,6 +54,15 @@ class YgraphInterpObserver(dt: Double, dx: Double) extends Actor {
   }
 
   def receive = {
+    case 'ElementsReady =>
+      subdomain ! 'GetLocalElements
+    case Subdomain.ElementsList(elements) =>
+      context.become(active(new InterpolatedDataHelper(elements.length, nodeId)))
+    case GllElement.StateChanged(name, x, chunk) =>
+      log.error("Too early!")
+  }
+
+  def active(helper: InterpolatedDataHelper): Receive = {
     case GllElement.StateChanged(name, x, chunk) =>
       val t0 = chunk.lastTime
       val t1 = chunk.currentTime
@@ -72,15 +83,40 @@ class YgraphInterpObserver(dt: Double, dx: Double) extends Actor {
           val interp = interpolators.getOrElseUpdate(
               (x.length, nInterp), GllBasis(x.length-1).interpolationMatrix(interpCoords))
           val u0 = interp * state.u(0)
-          val filename = "/tmp/harvest/" + name + ".yg"
-          val out = new PrintWriter(new FileWriter(filename, true))
-          out.println(f""""Time = ${state.t}%.6f""")
-          for (j <- 0 until u0.length) {
-            out.println(f"${map.mapX(interpCoords(j))}%.6f    ${u0(j)}%.6f")
-          }
-          out.println
-          out.close()
+          val coords = interpCoords map map.mapX
+          helper.put(t, coords, u0, sender)
         }
       }
+  }
+}
+
+class InterpolatedDataHelper(nElements: Int, nodeId: Int) {
+  val times = mutable.Map.empty[Double, (mutable.Set[ActorRef], mutable.Map[Double, Double])]
+
+  def put(time: Double, coords: DenseVector[Double], u0: DenseVector[Double], element: ActorRef) = {
+    assert(coords.length == u0.length)
+    if (!times.contains(time)) {
+      times(time) = (mutable.Set.empty[ActorRef], mutable.Map.empty[Double, Double])
+    }
+    val (elements, data) = times(time)
+    elements.add(element)
+    for (i <- 0 until coords.length) {
+      if (data.contains(coords(i))) {
+        // Assume at most two co-located values
+        data(coords(i)) = 0.5*(u0(i) + data(coords(i)))
+      } else data(coords(i)) = u0(i)
+    }
+    if (elements.size == nElements) {
+      // Write
+      val filename = s"/tmp/harvest/InterpOutput_$nodeId.yg"
+      val out = new PrintWriter(new FileWriter(filename, true))
+      out.println(f""""Time = ${time}%.6f""")
+      for ((k, v) <- data.toList.sorted) {
+        out.println(f"$k%.6f    $v%.6f")
+      }
+      out.println
+      out.close()
+      times.remove(time)
+    }
   }
 }

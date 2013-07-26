@@ -45,7 +45,7 @@ class EvolutionController(nNodes: Int) extends Actor with ActorLogging {
     waitForResponses(0, 'AllDone, () => {
         val wallTime = 1.0e-9 * (System.nanoTime - timestamp)
         log.info(f"All done! ($wallTime%.3f s)")
-        Thread.sleep(30000) // Blocking in receive!
+        Thread.sleep(5000) // Blocking in receive!
         domRouter ! 'Shutdown
       }, finished)
   }

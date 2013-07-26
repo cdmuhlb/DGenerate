@@ -25,7 +25,7 @@ class Subdomain(grid: GridDistribution, pde: FluxConservativePde,
   val elements = mutable.Map.empty[Int, ActorRef]
   // TODO: Read Observer parameters from config
   val obs = context.actorOf(Props(classOf[YgraphObserver], 0.1), "obs")
-  //val obs = context.actorOf(Props(classOf[YgraphInterpObserver], 0.1, 0.025), "obs")
+  //val obs = context.actorOf(Props(classOf[YgraphInterpObserver], 0.1, 0.025, nodeId), "obs")
 
   override def preStart = {
     createBoundaries()
@@ -66,12 +66,20 @@ class Subdomain(grid: GridDistribution, pde: FluxConservativePde,
       responses(sender) = true
       if (responses.forall(_._2)) {
         controller ! 'AllReady
+        // TODO: Race condition
+        obs ! 'ElementsReady
         context.become(ready(controller, emptyResponses))
       }
+    case 'GetLocalElements =>
+      // TODO: Subscribe to changes
+      sender ! Subdomain.ElementsList(elements.values.toList)
   }
 
   def ready(controller: ActorRef,
       responses: mutable.Map[ActorRef, Boolean]): Receive = {
+    case 'GetLocalElements =>
+      // TODO: Subscribe to changes
+      sender ! Subdomain.ElementsList(elements.values.toList)
     case 'GetStepper =>
       elements.values foreach { _ forward 'GetStepper }
     case 'DoneStepping =>
