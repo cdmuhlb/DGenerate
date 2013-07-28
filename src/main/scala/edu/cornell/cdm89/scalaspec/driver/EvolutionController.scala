@@ -14,12 +14,11 @@ class EvolutionController(nNodes: Int) extends Actor with ActorLogging {
   val t0 = config.getDouble("harvest.initial-time")
   val dt = config.getDouble("harvest.step-size")
   val nSteps = config.getInt("harvest.nr-of-steps")
-  val obsFreq = config.getInt("harvest.steps-per-obs")
-  val doObserve = config.getBoolean("harvest.observe-solution")
 
   // Create broadcast routers
   val domRouter = context.system.actorOf(Props.empty.withRouter(FromConfig), "domain")
   val idRouter = context.system.actorOf(Props.empty.withRouter(FromConfig), "initialData")
+  val obsRouter = context.system.actorOf(Props.empty.withRouter(FromConfig), "observers")
 
   override def receive = standby
 
@@ -30,7 +29,10 @@ class EvolutionController(nNodes: Int) extends Actor with ActorLogging {
   }
 
   def creatingElements: Receive = {
-    waitForResponses(0, 'ElementsCreated, () => idRouter ! 'ProvideId, loadingId)
+    waitForResponses(0, 'ElementsCreated, () => {
+      idRouter ! 'ProvideId
+      obsRouter ! 'Initialize
+    }, loadingId)
   }
 
   def loadingId: Receive = {

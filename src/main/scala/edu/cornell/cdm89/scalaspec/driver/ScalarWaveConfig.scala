@@ -25,5 +25,9 @@ class ScalarWaveConfig(config: Config) extends RunConfiguration {
       subdomain, 5.0, 0.5, 1.0), "idProvider")
   }
 
-  def createObsActor(system: ActorSystem, subdomain: ActorRef): ActorRef = ???
+  def createObsActor(system: ActorSystem, subdomain: ActorRef): ActorRef = {
+    val obsDt = config.getDouble("harvest.obs-dt")
+    system.actorOf(Props(classOf[YgraphObserver], obsDt, subdomain), "obs")
+    //system.actorOf(Props(classOf[YgraphInterpObserver], obsDt, 0.025, nodeId, subdomain), "obs")
+  }
 }

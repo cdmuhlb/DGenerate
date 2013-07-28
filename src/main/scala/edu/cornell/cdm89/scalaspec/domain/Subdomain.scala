@@ -23,9 +23,6 @@ class Subdomain(grid: GridDistribution, pde: FluxConservativePde,
     nodeId: Int) extends Actor with ActorLogging {
   val boundaries = mutable.Map.empty[Int, ActorRef]
   val elements = mutable.Map.empty[Int, ActorRef]
-  // TODO: Read Observer parameters from config
-  var obs = context.system.deadLetters
-  //val obs = context.actorOf(Props(classOf[YgraphInterpObserver], 0.1, 0.025, nodeId), "obs")
 
   override def preStart = {
     createBoundaries()
@@ -37,7 +34,6 @@ class Subdomain(grid: GridDistribution, pde: FluxConservativePde,
     case GllElement.CreateElements(domainRouter) =>
       createElements(domainRouter)
       sender ! 'ElementsCreated
-      obs = context.actorOf(Props(classOf[YgraphObserver], 0.1), "obs")
       context.become(setup2(sender, domainRouter,
           new ResponseTracker[Any, ActorRef](elements.values.toSet)))
     case Subdomain.FindRemoteBoundary(index, messageId) =>
@@ -57,28 +53,20 @@ class Subdomain(grid: GridDistribution, pde: FluxConservativePde,
       tracker.register('Ready, sender)
       if (tracker.keyCompleted('Ready)) {
         controller ! 'AllReady
-        context.become(ready(controller, new ResponseTracker[Any, ActorRef](elements.values.toSet + obs)))
+        context.become(ready(controller))
       }
   }
 
-  def ready(controller: ActorRef,
-      tracker: ResponseTracker[Any, ActorRef]): Receive = {
+  def ready(controller: ActorRef): Receive = {
     case 'GetLocalElements =>
       sender ! Subdomain.ElementsList(elements.values.toList)
     case 'GetStepper =>
       elements.values foreach { _ forward 'GetStepper }
     case 'DoneStepping =>
-      tracker.register('Done, sender)
-      if (tracker.keyCompleted('Done)) {
-        controller ! 'AllDone
-        context.become(finished)
-      }
+      // Do nothing; let Observer dictate shutdown
     case 'DoneObserving =>
-      tracker.register('Done, sender)
-      if (tracker.keyCompleted('Done)) {
-        controller ! 'AllDone
-        context.become(finished)
-      }
+      controller ! 'AllDone
+      context.become(finished)
   }
 
   def finished: Receive = {

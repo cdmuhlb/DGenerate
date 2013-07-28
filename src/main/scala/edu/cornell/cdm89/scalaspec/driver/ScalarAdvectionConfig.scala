@@ -25,7 +25,10 @@ class ScalarAdvectionConfig(a: Double, config: Config) extends RunConfiguration 
       "idProvider")
   }
 
-  def createObsActor(system: ActorSystem, subdomain: ActorRef): ActorRef = ???
+  def createObsActor(system: ActorSystem, subdomain: ActorRef): ActorRef = {
+    val obsDt = config.getDouble("harvest.obs-dt")
+    system.actorOf(Props(classOf[YgraphObserver], obsDt, subdomain), "obs")
+  }
 }
 
 
@@ -49,5 +52,8 @@ class Hesthaven53Config(config: Config) extends RunConfiguration {
       "idProvider")
   }
 
-  def createObsActor(system: ActorSystem, subdomain: ActorRef): ActorRef = ???
+  def createObsActor(system: ActorSystem, subdomain: ActorRef): ActorRef = {
+    val obsDt = config.getDouble("harvest.obs-dt")
+    system.actorOf(Props(classOf[YgraphObserver], obsDt, subdomain), "obs")
+  }
 }

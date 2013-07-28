@@ -13,16 +13,12 @@ import edu.cornell.cdm89.scalaspec.ode.TimeStepper.TimeChunk
 import edu.cornell.cdm89.scalaspec.spectral.GllBasis
 import edu.cornell.cdm89.scalaspec.util.ResponseTracker
 
-class YgraphObserver(dt: Double) extends Actor {
-  val subdomain = context.parent
-
-  override def preStart = {
-    subdomain ! 'GetLocalElements
-  }
-
+class YgraphObserver(dt: Double, subdomain: ActorRef) extends Actor {
   def receive = setup
 
   def setup: Receive = {
+    case 'Initialize =>
+      subdomain ! 'GetLocalElements
     case Subdomain.ElementsList(elements) =>
       elements foreach { _ ! GllElement.SetObserver(self) }
       context.become(ready(new ResponseTracker[Any, ActorRef](elements.toSet)))
@@ -56,9 +52,9 @@ class YgraphObserver(dt: Double) extends Actor {
   }
 }
 
-class YgraphInterpObserver(dt: Double, dx: Double, nodeId: Int) extends Actor with ActorLogging {
+class YgraphInterpObserver(dt: Double, dx: Double, nodeId: Int,
+    subdomain: ActorRef) extends Actor with ActorLogging {
   val interpolators = mutable.Map.empty[(Int, Int), DenseMatrix[Double]]
-  val subdomain = context.parent
 
   private def xInterp(xL: Double, xR: Double) = {
     val map = new AffineMap(xL, xR)
@@ -73,16 +69,23 @@ class YgraphInterpObserver(dt: Double, dx: Double, nodeId: Int) extends Actor wi
     ans
   }
 
-  def receive = {
-    case 'ElementsReady =>
-      subdomain ! 'GetLocalElements
-    case Subdomain.ElementsList(elements) =>
-      context.become(active(new InterpolatedDataHelper(elements.length, nodeId)))
-    case GllElement.StateChanged(name, chunk) =>
-      log.error("Too early!")
+  override def preStart = {
+    subdomain ! 'GetLocalElements
   }
 
-  def active(helper: InterpolatedDataHelper): Receive = {
+  def receive = setup
+
+  def setup: Receive = {
+    case 'Initialize =>
+      subdomain ! 'GetLocalElements
+    case Subdomain.ElementsList(elements) =>
+      elements foreach { _ ! GllElement.SetObserver(self) }
+      context.become(active(new InterpolatedDataHelper(elements.length, nodeId),
+          new ResponseTracker[Any, ActorRef](elements.toSet)))
+  }
+
+  def active(helper: InterpolatedDataHelper,
+      tracker: ResponseTracker[Any, ActorRef]): Receive = {
     case GllElement.StateChanged(name, chunk) =>
       val t0 = chunk.lastTime
       val t1 = chunk.currentTime
@@ -107,6 +110,10 @@ class YgraphInterpObserver(dt: Double, dx: Double, nodeId: Int) extends Actor wi
           helper.put(t, coords, u0, sender)
         }
       }
+    case 'DoneStepping =>
+      tracker.register('DoneStepping, sender)
+      // Not very robust
+      if (tracker.allCompleted) subdomain ! 'DoneObserving
   }
 }
 

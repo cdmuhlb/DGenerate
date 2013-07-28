@@ -29,8 +29,6 @@ object Main extends App {
   val seedNodes = immutableSeq(config.getStringList(
       "harvest.cluster.seed-nodes")).map {
       case AddressFromURIString(addr) => addr }.toVector
-  //val obsFreq = config.getInt("harvest.steps-per-obs")
-  //val doObserve = config.getBoolean("harvest.observe-solution")
   val nNodes = config.getInt("akka.cluster.role.compute.min-nr-of-members")
   val nodeId = Cluster(system).selfAddress.port.get - 2552 // Hack
   require((nodeId >= 0) && (nodeId < nNodes))
@@ -51,6 +49,9 @@ object Main extends App {
 
   // Establish initial data
   val idActor = runConf.createIdActor(system, subdomain)
+
+  // Create observer
+  val obsActor = runConf.createObsActor(system, subdomain)
 
   if (nodeId == 0) {
     val control = system.actorOf(Props(classOf[EvolutionController], nNodes), "driver")
