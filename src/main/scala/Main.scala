@@ -35,9 +35,9 @@ object Main extends App {
   val nodeId = Cluster(system).selfAddress.port.get - 2552 // Hack
   require((nodeId >= 0) && (nodeId < nNodes))
 
-  //val runConf = new ScalarAdvectionConfig(2.0*math.Pi, config)
+  val runConf = new ScalarAdvectionConfig(2.0*math.Pi, config)
   //val runConf = new Hesthaven53(config)
-  val runConf = new ScalarWaveConfig(config)
+  //val runConf = new ScalarWaveConfig(config)
   val pde = runConf.pde
   val leftBc = runConf.leftBc
   val rightBc = runConf.rightBc

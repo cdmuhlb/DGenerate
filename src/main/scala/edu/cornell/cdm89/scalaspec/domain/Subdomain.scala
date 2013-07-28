@@ -88,18 +88,18 @@ class Subdomain(grid: GridDistribution, pde: FluxConservativePde,
 
   private def createBoundaries(): Unit = {
     // Periodic BC HACK
-    boundaries(0) = context.actorOf(Props(classOf[InternalBoundaryActor],
-      -1.0), "boundary0")
+    //boundaries(0) = context.actorOf(Props(classOf[InternalBoundaryActor],
+    //  -1.0), "boundary0")
 
     for ((b, bc) <- grid.myExternalBoundaries(nodeId)) {
-      //boundaries(b.index) = context.actorOf(Props(classOf[ExternalBoundaryActor],
-      //    b.x, bc), s"boundary${b.index}")
+      boundaries(b.index) = context.actorOf(Props(classOf[ExternalBoundaryActor],
+          b.x, bc), s"boundary${b.index}")
 
       // Periodic BC HACK
-      if (b.index != 0) {
-        boundaries(b.index) = context.actorOf(Props(classOf[Forwarder],
-            boundaries(0)), s"boundary${b.index}")
-      }
+      //if (b.index != 0) {
+      //  boundaries(b.index) = context.actorOf(Props(classOf[Forwarder],
+      //      boundaries(0)), s"boundary${b.index}")
+      //}
     }
     for (b <- grid.myInternalBoundaries(nodeId)) {
       boundaries(b.index) = context.actorOf(Props(classOf[InternalBoundaryActor],
