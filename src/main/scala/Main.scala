@@ -1,22 +1,14 @@
 import akka.actor.{ActorSystem, Props}
 import akka.actor.AddressFromURIString
-import akka.actor.Inbox
 import akka.cluster.Cluster
-import akka.routing.FromConfig
 import akka.japi.Util.immutableSeq
 import scala.concurrent.duration._
 import com.typesafe.config.ConfigFactory
 
-import edu.cornell.cdm89.scalaspec.domain.{DomainInfo, Subdomain, GllElement}
+import edu.cornell.cdm89.scalaspec.domain.{DomainInfo, Subdomain}
 import edu.cornell.cdm89.scalaspec.domain.{ContiguousGrid, RoundRobinGrid}
-import edu.cornell.cdm89.scalaspec.pde.BoundaryCondition
-import edu.cornell.cdm89.scalaspec.pde.LaxFriedrichsFlux.BoundaryValues
-import edu.cornell.cdm89.scalaspec.ode.OdeState
-import edu.cornell.cdm89.scalaspec.pde.{ScalarWaveEquation, ScalarAdvectionEquation}
-import edu.cornell.cdm89.scalaspec.pde.{SineBoundary, AdvectionOutflowBoundary, AdvectionConstantBoundary}
-import edu.cornell.cdm89.scalaspec.pde.{WaveOutflowBoundary, WaveInversionBoundary, WaveReflectionBoundary}
-import edu.cornell.cdm89.scalaspec.pde.{SineWaveInitialData, TrianglePulseInitialData}
-import edu.cornell.cdm89.scalaspec.driver.EvolutionController
+import edu.cornell.cdm89.scalaspec.driver.{EvolutionController, RunConfiguration}
+import edu.cornell.cdm89.scalaspec.driver.{ScalarAdvectionConfig, ScalarWaveConfig, Hesthaven53Config}
 
 object Main extends App {
   val config = {
@@ -34,8 +26,6 @@ object Main extends App {
   val system = ActorSystem("Harvest", config)
 
   // Load configuration
-  val order = config.getInt("harvest.order-of-elements")
-  val nElems = config.getInt("harvest.nr-of-elements")
   val seedNodes = immutableSeq(config.getStringList(
       "harvest.cluster.seed-nodes")).map {
       case AddressFromURIString(addr) => addr }.toVector
@@ -45,29 +35,22 @@ object Main extends App {
   val nodeId = Cluster(system).selfAddress.port.get - 2552 // Hack
   require((nodeId >= 0) && (nodeId < nNodes))
 
-  // PDE
-  //val a = 2.0*math.Pi
-  //val pde = new ScalarAdvectionEquation(a)
-  val pde = new ScalarWaveEquation
-
-  // Boundary conditions
-  //val leftBc = new SineBoundary(a, 1.0)
-  //val rightBc = new OutflowBoundary(-1.0)
-  val leftBc = new WaveOutflowBoundary(1.0)
-  val rightBc = new WaveOutflowBoundary(-1.0)
+  //val runConf = new ScalarAdvectionConfig(2.0*math.Pi, config)
+  //val runConf = new Hesthaven53(config)
+  val runConf = new ScalarWaveConfig(config)
+  val pde = runConf.pde
+  val leftBc = runConf.leftBc
+  val rightBc = runConf.rightBc
+  val domInfo = runConf.domainInfo
 
   // Create domain
-  val domInfo = DomainInfo(0.0, 10.0, order, nElems)
   val grid = new ContiguousGrid(domInfo, nNodes, leftBc, rightBc)
   //val grid = new RoundRobinGrid(domInfo, nNodes, leftBc, rightBc)
   val subdomain = system.actorOf(Props(classOf[Subdomain], grid,
       pde, nodeId), "subdomain")
 
   // Establish initial data
-  //val idActor = system.actorOf(Props(classOf[SineWaveInitialData], subdomain),
-  //    "idProvider")
-  val idActor = system.actorOf(Props(classOf[TrianglePulseInitialData],
-      subdomain, 5.0, 0.5, 1.0), "idProvider")
+  val idActor = runConf.createIdActor(system, subdomain)
 
   if (nodeId == 0) {
     val control = system.actorOf(Props(classOf[EvolutionController], nNodes), "driver")

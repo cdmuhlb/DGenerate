@@ -8,13 +8,28 @@ import akka.actor.{Actor, ActorRef, ActorLogging}
 import breeze.linalg.{DenseMatrix, DenseVector}
 
 import edu.cornell.cdm89.scalaspec.domain.{AffineMap, GllElement, Subdomain}
-import edu.cornell.cdm89.scalaspec.ode.OdeState
+import edu.cornell.cdm89.scalaspec.ode.ElementState
 import edu.cornell.cdm89.scalaspec.ode.TimeStepper.TimeChunk
 import edu.cornell.cdm89.scalaspec.spectral.GllBasis
+import edu.cornell.cdm89.scalaspec.util.ResponseTracker
 
 class YgraphObserver(dt: Double) extends Actor {
-  def receive = {
-    case GllElement.StateChanged(name, x, chunk) =>
+  val subdomain = context.parent
+
+  override def preStart = {
+    subdomain ! 'GetLocalElements
+  }
+
+  def receive = setup
+
+  def setup: Receive = {
+    case Subdomain.ElementsList(elements) =>
+      elements foreach { _ ! GllElement.SetObserver(self) }
+      context.become(ready(new ResponseTracker[Any, ActorRef](elements.toSet)))
+  }
+
+  def ready(tracker: ResponseTracker[Any, ActorRef]): Receive = {
+    case GllElement.StateChanged(name, chunk) =>
       val t0 = chunk.lastTime
       val t1 = chunk.currentTime
       // Assumes positive t0 and/or dt?
@@ -23,16 +38,21 @@ class YgraphObserver(dt: Double) extends Actor {
       val i1 = math.floor(t1/dt).toInt
       for (i <- i0 to i1) {
         val t = dt*i
+        tracker.register(t, sender)
         val state = chunk.interpolate(t)
         val filename = "/tmp/harvest/" + name + ".yg"
         val out = new PrintWriter(new FileWriter(filename, true))
         out.println(f""""Time = ${state.t}%.6f""")
         for (j <- 0 until state.u.head.length) {
-          out.println(f"${x(j)}%.6f    ${state.u(0)(j)}%.6f")
+          out.println(f"${state.x(j)}%.6f    ${state.u(0)(j)}%.6f")
         }
         out.println
         out.close()
       }
+    case 'DoneStepping =>
+      tracker.register('DoneStepping, sender)
+      // Not very robust
+      if (tracker.allCompleted) subdomain ! 'DoneObserving
   }
 }
 
@@ -58,12 +78,12 @@ class YgraphInterpObserver(dt: Double, dx: Double, nodeId: Int) extends Actor wi
       subdomain ! 'GetLocalElements
     case Subdomain.ElementsList(elements) =>
       context.become(active(new InterpolatedDataHelper(elements.length, nodeId)))
-    case GllElement.StateChanged(name, x, chunk) =>
+    case GllElement.StateChanged(name, chunk) =>
       log.error("Too early!")
   }
 
   def active(helper: InterpolatedDataHelper): Receive = {
-    case GllElement.StateChanged(name, x, chunk) =>
+    case GllElement.StateChanged(name, chunk) =>
       val t0 = chunk.lastTime
       val t1 = chunk.currentTime
       // Assumes positive t0 and/or dt?
@@ -74,14 +94,14 @@ class YgraphInterpObserver(dt: Double, dx: Double, nodeId: Int) extends Actor wi
         val t = dt*i
         val state = chunk.interpolate(t)
 
-        val xL = x(0)
-        val xR = x(x.length-1)
+        val xL = state.x(0)
+        val xR = state.x(state.x.length-1)
         val interpCoords = xInterp(xL, xR)
         val nInterp = interpCoords.length
         if (nInterp > 0) {
           val map = new AffineMap(xL, xR)
           val interp = interpolators.getOrElseUpdate(
-              (x.length, nInterp), GllBasis(x.length-1).interpolationMatrix(interpCoords))
+              (state.x.length, nInterp), GllBasis(state.x.length-1).interpolationMatrix(interpCoords))
           val u0 = interp * state.u(0)
           val coords = interpCoords map map.mapX
           helper.put(t, coords, u0, sender)

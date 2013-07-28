@@ -9,22 +9,22 @@ import akka.util.Timeout
 import breeze.linalg.DenseVector
 
 import edu.cornell.cdm89.scalaspec.spectral.GllBasis
-import edu.cornell.cdm89.scalaspec.ode.{Ode, OdeState, FieldVec}
+import edu.cornell.cdm89.scalaspec.ode.{Ode, ElementState, FieldVec}
 import edu.cornell.cdm89.scalaspec.ode.{TimeStepper, BogackiShampineStepper, TimestepController}
 import edu.cornell.cdm89.scalaspec.ode.FluxConservativeMethodOfLines
 import edu.cornell.cdm89.scalaspec.pde.FluxConservativePde
 import edu.cornell.cdm89.scalaspec.ode.TimeStepper.{InitializeState, TimeChunk}
 
 object GllElement {
-  case class InitialData(state: OdeState)
+  case class InitialData(state: ElementState)
   case class StepTo(t: Double)
   case class AdvanceState(chunk: TimeChunk)
-  case class RhsResult(state: OdeState, rhs: FieldVec)
+  case class RhsResult(state: ElementState, rhs: FieldVec)
   case class Coords(x: DenseVector[Double])
   case class FindBoundary(index: Int, messageId: Any)
   case class CreateElements(domain: ActorRef)
   case class SetObserver(obs: ActorRef)
-  case class StateChanged(name: String, coords: DenseVector[Double], chunk: TimeChunk)
+  case class StateChanged(name: String, chunk: TimeChunk)
   case class HaveTimeStepper(stepper: ActorRef)
 }
 
@@ -37,14 +37,15 @@ class GllElement(basis: GllBasis, map: AffineMap,
   val name = self.path.name
   val coords = basis.nodes map map.mapX
   val minDx = (coords.toArray.sliding(2) map {p => p(1) - p(0)}).min
-  
+
   var stepper = context.system.deadLetters
   var observer = context.system.deadLetters
 
   class SetupTracker {
     private var leftBoundary = Option.empty[ActorRef]
     private var rightBoundary = Option.empty[ActorRef]
-    private var id = Option.empty[OdeState]
+    private var obs = Option.empty[ActorRef]
+    private var id = Option.empty[ElementState]
     private var ode = Option.empty[Ode]
 
     def haveLeft(left: ActorRef): Unit = {
@@ -57,7 +58,12 @@ class GllElement(basis: GllBasis, map: AffineMap,
       checkBoundaries()
     }
 
-    def haveId(state: OdeState): Unit = {
+    def haveObserver(obsIn: ActorRef): Unit = {
+      obs = Some(obsIn)
+      checkCompletion()
+    }
+
+    def haveId(state: ElementState): Unit = {
       id = Some(state)
       checkCompletion()
     }
@@ -69,7 +75,9 @@ class GllElement(basis: GllBasis, map: AffineMap,
     }
 
     private def checkCompletion(): Unit = {
-      if (ode.nonEmpty) {
+      // TODO: Waiting for observer delays RHS computation unnecessarily
+      if (ode.nonEmpty && obs.nonEmpty) {
+        observer = obs.get
         context.become(uninitialized(ode.get))
         if (id.nonEmpty) {
           self ! GllElement.InitialData(id.get)
@@ -97,6 +105,8 @@ class GllElement(basis: GllBasis, map: AffineMap,
       log.error(s"Could not find $lr boundary for element $name")
     case InitialData(state) =>
       tracker.haveId(state)
+    case SetObserver(obs) =>
+      tracker.haveObserver(obs)
     case 'GetCoords =>
       sender ! Coords(coords)
   }
@@ -117,24 +127,22 @@ class GllElement(basis: GllBasis, map: AffineMap,
       context.become(initialized(state, rhs))
   }
 
-  def initialized(state: OdeState, rhs: FieldVec): Receive = {
+  def initialized(state: ElementState, rhs: FieldVec): Receive = {
     case 'GetStepper => sender ! HaveTimeStepper(stepper)
-    case SetObserver(obs) =>
-      observer = obs
-      sender ! 'Ack
     case AdvanceState(chunk) =>
       require(chunk.lastState.t == state.t)
-      observer ! StateChanged(name, coords, chunk)
+      observer ! StateChanged(name, chunk)
       context.become(active(chunk))
   }
 
   def active(state: TimeChunk): Receive = {
     case AdvanceState(chunk) =>
       require(chunk.lastState.t == state.currentState.t)
-      observer ! StateChanged(name, coords, chunk)
+      observer ! StateChanged(name, chunk)
       //log.info(s"Stepped to ${chunk.currentState.t}")
       context.become(active(chunk))
     case 'DoneStepping =>
+      observer ! 'DoneStepping
       controller ! 'DoneStepping
   }
 }

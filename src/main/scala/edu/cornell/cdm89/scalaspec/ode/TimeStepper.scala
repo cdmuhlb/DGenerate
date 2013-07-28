@@ -2,15 +2,17 @@ package edu.cornell.cdm89.scalaspec.ode
 
 import akka.actor.{Actor, ActorRef, Props}
 
+import edu.cornell.cdm89.scalaspec.spectral.GllBasis
+
 object TimeStepper {
-  case class InitializeState(state: OdeState, rhs: FieldVec)
+  case class InitializeState(state: ElementState, rhs: FieldVec)
 
   trait TimeChunk {
-    def lastState: OdeState
+    def lastState: ElementState
     def lastRhs: FieldVec
-    def currentState: OdeState
+    def currentState: ElementState
     def currentRhs: FieldVec
-    def interpolate(t: Double): OdeState
+    def interpolate(t: Double): ElementState
 
     def lastTime: Double = lastState.t
     def currentTime: Double = currentState.t
@@ -35,7 +37,7 @@ class TimeStepper(ode: Ode) extends Actor {
       context.become(ready(state, rhs))
   }
 
-  def ready(state: OdeState, rhs: FieldVec): Receive = {
+  def ready(state: ElementState, rhs: FieldVec): Receive = {
     case TimestepController.TakeStep(dt) =>
       tsWorker ! BogackiShampineStepper.TakeStep(dt, state, rhs)
       context.become(stepping(sender))
@@ -52,11 +54,29 @@ class TimeStepper(ode: Ode) extends Actor {
 
   def stateCi(chunk: TimeChunk): Receive = {
     case 'StepApproved =>
-      element ! AdvanceState(chunk)
-      context.become(ready(chunk.currentState, chunk.currentRhs))
+      //val filteredChunk = filterChunk(chunk)
+      val filteredChunk = chunk
+      element ! AdvanceState(filteredChunk)
+      context.become(ready(filteredChunk.currentState, filteredChunk.currentRhs))
     case 'StepRejected =>
       context.become(ready(chunk.lastState, chunk.lastRhs))
     case TimestepController.SpeculativeYes(dt) =>
       // TODO: Let's get the easy stuff working first...
+  }
+
+  def filterChunk(chunk: TimeChunk): TimeChunk = {
+    val alpha = 36
+    val sTilde = 8
+    val basis = GllBasis(chunk.currentState.u(0).length-1)
+    val filteredState = chunk.currentState.u map { ui =>
+      val spec = basis.spectralCoefficients(ui)
+      for (i <- 0 until spec.length) {
+        val eta = i / spec.length
+        spec(i) *= math.exp(-alpha * math.pow(eta, 2.0*sTilde))
+      }
+      basis.sumCoefficients(spec)
+    }
+    BogackiShampineStepper.RK3TimeChunk(chunk.lastState, chunk.lastRhs,
+        ElementState(chunk.currentState.t, chunk.currentState.x, filteredState), chunk.currentRhs)
   }
 }

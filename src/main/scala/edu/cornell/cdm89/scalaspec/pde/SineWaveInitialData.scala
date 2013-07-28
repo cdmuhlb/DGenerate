@@ -5,9 +5,9 @@ import breeze.numerics._
 
 import edu.cornell.cdm89.scalaspec.domain.GllElement.{Coords, InitialData}
 import edu.cornell.cdm89.scalaspec.domain.Subdomain
-import edu.cornell.cdm89.scalaspec.ode.OdeState
+import edu.cornell.cdm89.scalaspec.ode.ElementState
 
-class SineWaveInitialData(subdomain: ActorRef) extends Actor {
+class SineWaveInitialData(amplitude: Double, coef: Double, subdomain: ActorRef) extends Actor {
   // TODO: Refactor into base class
   def receive = {
     case 'ProvideId =>
@@ -21,7 +21,7 @@ class SineWaveInitialData(subdomain: ActorRef) extends Actor {
     // TODO: Count responses
     case Coords(x) =>
       val t0 = 0.0
-      val u0 = Vector(sin(x))
-      sender ! InitialData(OdeState(t0, u0))
+      val u0 = Vector(sin(x :* coef) :* amplitude)
+      sender ! InitialData(ElementState(t0, x, u0))
   }
 }

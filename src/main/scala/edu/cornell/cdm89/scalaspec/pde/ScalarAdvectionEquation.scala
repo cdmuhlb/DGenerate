@@ -3,16 +3,30 @@ package edu.cornell.cdm89.scalaspec.pde
 import scala.concurrent.{ExecutionContext, Future, future}
 import breeze.linalg.DenseVector
 
-import edu.cornell.cdm89.scalaspec.ode.{OdeState, FieldVec, PointVec}
+import edu.cornell.cdm89.scalaspec.ode.{ElementState, PointState, FieldVec, PointVec}
 
 class ScalarAdvectionEquation(a: Double) extends FluxConservativePde {
-  override def flux(u: OdeState)(implicit executor: ExecutionContext): Future[FieldVec] = future {
-    Vector(u.u(0) :* a)
+  def flux(state: ElementState)(implicit executor: ExecutionContext): Future[FieldVec] = future {
+    Vector(state.u(0) :* a)
   }
 
-  override def source(u: OdeState)(implicit executor: ExecutionContext): Future[FieldVec] = future {
-    Vector(DenseVector.zeros[Double](u.u(0).length))
+  def source(state: ElementState)(implicit executor: ExecutionContext): Future[FieldVec] = future {
+    Vector(DenseVector.zeros[Double](state.u(0).length))
   }
-  
-  override def maxLambda(t: Double, u: PointVec): Double = a
+
+  def maxLambda(state: PointState): Double = a
+}
+
+class Hesthaven53Equation extends FluxConservativePde {
+  def flux(state: ElementState)(implicit executor: ExecutionContext): Future[FieldVec] = future {
+    Vector(state.u(0) :* (state.x map a))
+  }
+
+  def source(state: ElementState)(implicit executor: ExecutionContext): Future[FieldVec] = future {
+    Vector(DenseVector.zeros[Double](state.u(0).length))
+  }
+
+  def maxLambda(state: PointState): Double = a(state.x)
+
+  private def a(x: Double) = math.pow((1.0 - x*x), 5) + 1.0
 }

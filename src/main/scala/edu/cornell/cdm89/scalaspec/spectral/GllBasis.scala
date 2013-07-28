@@ -2,7 +2,7 @@ package edu.cornell.cdm89.scalaspec.spectral
 
 import breeze.linalg._
 
-import edu.cornell.cdm89.scalaspec.math.JacobiPolynomials
+import edu.cornell.cdm89.scalaspec.math.{JacobiPolynomials, LegendrePolynomials}
 
 case class GllBasis(order: Int) {
   // nodes.length == order+1
@@ -13,6 +13,9 @@ case class GllBasis(order: Int) {
   
   //def d1Matrix = myD1.copy
   def differentiate(u: DenseVector[Double]) = myD1*u
+
+  def spectralCoefficients(u: DenseVector[Double]) = mySpectralTransform*u
+  def sumCoefficients(spec: DenseVector[Double]) = mySpectralTransform \ spec
 
   def interpolationMatrix(x: DenseVector[Double]):DenseMatrix[Double] = {
     val ans = DenseMatrix.zeros[Double](x.length, order+1)
@@ -100,6 +103,15 @@ case class GllBasis(order: Int) {
       ans(i, i) = -sum
     }
 
+    ans
+  }
+
+  private lazy val mySpectralTransform = {
+    val n = order + 1
+    val ans = DenseMatrix.zeros[Double](n, n)
+    for (i <- 0 until n; j <- 0 until n) {
+      ans(i, j) = myWeights(j)*LegendrePolynomials.p(i, myNodes(j))
+    }
     ans
   }
   

@@ -3,16 +3,16 @@ package edu.cornell.cdm89.scalaspec.pde
 import scala.concurrent.{ExecutionContext, Future, future}
 import breeze.linalg.DenseVector
 
-import edu.cornell.cdm89.scalaspec.ode.{OdeState, FieldVec, PointVec}
+import edu.cornell.cdm89.scalaspec.ode.{ElementState, PointState, FieldVec, PointVec}
 
 class ScalarWaveEquation extends FluxConservativePde {
-  override def flux(u: OdeState)(implicit executor: ExecutionContext): Future[FieldVec] = future {
-    Vector(DenseVector.zeros[Double](u.u(0).length), u.u(2), u.u(1))
+  def flux(state: ElementState)(implicit executor: ExecutionContext): Future[FieldVec] = future {
+    Vector(DenseVector.zeros[Double](state.u(0).length), state.u(2), state.u(1))
   }
 
-  override def source(u: OdeState)(implicit executor: ExecutionContext): Future[FieldVec] = future {
-    Vector(-u.u(1), DenseVector.zeros[Double](u.u(0).length), DenseVector.zeros[Double](u.u(0).length))
+  def source(state: ElementState)(implicit executor: ExecutionContext): Future[FieldVec] = future {
+    Vector(-state.u(1), DenseVector.zeros[Double](state.u(0).length), DenseVector.zeros[Double](state.u(0).length))
   }
   
-  def maxLambda(t: Double, u: PointVec): Double = 1.0
+  def maxLambda(state: PointState): Double = 1.0
 }

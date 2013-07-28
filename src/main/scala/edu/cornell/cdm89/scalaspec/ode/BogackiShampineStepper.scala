@@ -6,12 +6,12 @@ import breeze.linalg.DenseVector
 import breeze.numerics._
 
 object BogackiShampineStepper {
-  case class TakeStep(dt: Double, y1: OdeState, k1: FieldVec)
+  case class TakeStep(dt: Double, y1: ElementState, k1: FieldVec)
   case class StepResult(chunk: TimeStepper.TimeChunk, err: Double)
 
   case class Stage2Result(k2: FieldVec)
   case class Stage3Result(k3: FieldVec)
-  case class Stage4Result(state4: OdeState, k4: FieldVec)
+  case class Stage4Result(state4: ElementState, k4: FieldVec)
 
   def measureError(y: FieldVec, z: FieldVec): Double = {
     val alpha = 1000.0
@@ -21,9 +21,9 @@ object BogackiShampineStepper {
     errVec.max
   }
 
-  case class RK3TimeChunk(lastState: OdeState, lastRhs: FieldVec,
-      currentState: OdeState, currentRhs: FieldVec) extends TimeStepper.TimeChunk {
-    def interpolate(t: Double): OdeState = {
+  case class RK3TimeChunk(lastState: ElementState, lastRhs: FieldVec,
+      currentState: ElementState, currentRhs: FieldVec) extends TimeStepper.TimeChunk {
+    def interpolate(t: Double): ElementState = {
       require((t >= lastState.t) && (t <= currentState.t))
       if (t == lastState.t) lastState
       else if (t == currentState.t) currentState
@@ -35,7 +35,8 @@ object BogackiShampineStepper {
           (y0:*(1.0 - s)) + (y1:*s) + ((((y1 - y0):*(1.0 - 2.0*s)) +
           (f0:*(h*(s-1.0))) + (f1:*(h*s))):*(s*(s-1.0)))
         }
-        OdeState(t, u)
+        // Assume element coordinates are constant
+        ElementState(t, currentState.x, u)
       }
     }
   }
@@ -57,26 +58,26 @@ class BogackiShampineStepper(ode: Ode) extends Actor {
       val y2 = state1.u.zip(k1) map { case(u, k) =>
         u + (k:*(0.5*dt))
       }
-      val state2 = OdeState(t2, y2)
+      val state2 = ElementState(t2, state1.x, y2)
       val k2Future = ode.rhs(state2)
       k2Future onSuccess { case k2 => self ! Stage2Result(k2) }
       context.become(stage2(sender, dt, state1, k1))
   }
 
-  def stage2(controller: ActorRef, dt: Double, state1: OdeState,
+  def stage2(controller: ActorRef, dt: Double, state1: ElementState,
       k1: FieldVec): Receive = {
     case Stage2Result(k2) =>
       val t3 = state1.t + 0.75*dt
       val y3 = state1.u.zip(k2) map { case(u, k) =>
         u + (k:*(0.75*dt))
       }
-      val state3 = OdeState(t3, y3)
+      val state3 = ElementState(t3, state1.x, y3)
       val k3Future = ode.rhs(state3)
       k3Future onSuccess { case k3 => self ! Stage3Result(k3) }
       context.become(stage3(controller, dt, state1, k1, k2))
   }
 
-  def stage3(controller: ActorRef, dt: Double, state1: OdeState, k1: FieldVec,
+  def stage3(controller: ActorRef, dt: Double, state1: ElementState, k1: FieldVec,
       k2: FieldVec): Receive = {
     case Stage3Result(k3) =>
       val t4 = state1.t + dt
@@ -84,13 +85,13 @@ class BogackiShampineStepper(ode: Ode) extends Actor {
         case (u, (kk1, (kk2, kk3))) =>
           u + (kk1:*(2.0*dt/9.0)) + (kk2:*(dt/3.0)) + (kk3:*(4.0*dt/9.0))
       }
-      val state4 = OdeState(t4, y4)
+      val state4 = ElementState(t4, state1.x, y4)
       val k4Future = ode.rhs(state4)
       k4Future onSuccess { case k4 => self ! Stage4Result(state4, k4) }
       context.become(stage4(controller, dt, state1, k1, k2, k3))
   }
 
-  def stage4(controller: ActorRef, dt: Double, state1: OdeState, k1: FieldVec,
+  def stage4(controller: ActorRef, dt: Double, state1: ElementState, k1: FieldVec,
       k2: FieldVec, k3: FieldVec): Receive = {
     case Stage4Result(state4, k4) =>
       val t4 = state1.t + dt

@@ -14,7 +14,7 @@ class FluxConservativeMethodOfLines(pde: FluxConservativePde, basis: GllBasis,
     jacobian: Double, leftBoundary: ActorRef, rightBoundary: ActorRef) extends Ode {
   val weights = basis.weights
 
-  override def rhs(state: OdeState)(implicit executor: ExecutionContext): Future[FieldVec] = {
+  override def rhs(state: ElementState)(implicit executor: ExecutionContext): Future[FieldVec] = {
     val myFlux = pde.flux(state)
     val mySource = pde.source(state)
     val futBvL = onLeftBoundary(state, myFlux)
@@ -50,21 +50,21 @@ class FluxConservativeMethodOfLines(pde: FluxConservativePde, basis: GllBasis,
     }
   }
 
-  private def onLeftBoundary(state: OdeState,
+  private def onLeftBoundary(state: ElementState,
       flux: Future[FieldVec])(implicit executor: ExecutionContext): Future[BoundaryValues] = {
     flux map { f =>
       val bu = state.u.map { ui => ui(0) }
       val bf = f.map{ fi => fi(0) }
-      BoundaryValues(state.t, bu, bf, pde.maxLambda(state.t, bu), -1.0)
+      BoundaryValues(state.t, bu, bf, pde.maxLambda(PointState(state.t, state.x(0), bu)), -1.0)
     }
   }
 
-  private def onRightBoundary(state: OdeState,
+  private def onRightBoundary(state: ElementState,
       flux: Future[FieldVec])(implicit executor: ExecutionContext): Future[BoundaryValues] = {
     flux map { f =>
       val bu = state.u.map { ui => ui(ui.length-1) }
       val bf = f.map{ fi => fi(fi.length-1) }
-      BoundaryValues(state.t, bu, bf, pde.maxLambda(state.t, bu), 1.0)
+      BoundaryValues(state.t, bu, bf, pde.maxLambda(PointState(state.t, state.x(state.x.length-1), bu)), 1.0)
     }
   }
 }

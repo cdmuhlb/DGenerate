@@ -5,7 +5,7 @@ import breeze.linalg.DenseVector
 
 import edu.cornell.cdm89.scalaspec.domain.GllElement.{Coords, InitialData}
 import edu.cornell.cdm89.scalaspec.domain.Subdomain
-import edu.cornell.cdm89.scalaspec.ode.OdeState
+import edu.cornell.cdm89.scalaspec.ode.ElementState
 import edu.cornell.cdm89.scalaspec.spectral.GllBasis
 
 class TrianglePulseInitialData(subdomain: ActorRef, center: Double,
@@ -33,6 +33,6 @@ class TrianglePulseInitialData(subdomain: ActorRef, center: Double,
       }
       val pi0 = DenseVector.zeros[Double](xs.length)
       val phi0 = basis.differentiate(psi0) :* (2.0/width)
-      sender ! InitialData(OdeState(t0, Vector(psi0, pi0, phi0)))
+      sender ! InitialData(ElementState(t0, xs, Vector(psi0, pi0, phi0)))
   }
 }

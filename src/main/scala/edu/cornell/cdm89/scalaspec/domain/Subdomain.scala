@@ -9,10 +9,10 @@ import akka.cluster.Cluster
 import akka.remote.RemoteScope
 import breeze.linalg.DenseVector
 
-import edu.cornell.cdm89.scalaspec.ode.OdeState
 import edu.cornell.cdm89.scalaspec.pde.FluxConservativePde
 import edu.cornell.cdm89.scalaspec.spectral.GllBasis
 import edu.cornell.cdm89.scalaspec.driver.{YgraphObserver, YgraphInterpObserver}
+import edu.cornell.cdm89.scalaspec.util.ResponseTracker
 
 object Subdomain {
   case class FindRemoteBoundary(index: Int, messageId: Any)
@@ -24,7 +24,7 @@ class Subdomain(grid: GridDistribution, pde: FluxConservativePde,
   val boundaries = mutable.Map.empty[Int, ActorRef]
   val elements = mutable.Map.empty[Int, ActorRef]
   // TODO: Read Observer parameters from config
-  val obs = context.actorOf(Props(classOf[YgraphObserver], 0.1), "obs")
+  var obs = context.system.deadLetters
   //val obs = context.actorOf(Props(classOf[YgraphInterpObserver], 0.1, 0.025, nodeId), "obs")
 
   override def preStart = {
@@ -37,15 +37,16 @@ class Subdomain(grid: GridDistribution, pde: FluxConservativePde,
     case GllElement.CreateElements(domainRouter) =>
       createElements(domainRouter)
       sender ! 'ElementsCreated
-      context.become(setup2(sender, domainRouter, emptyResponses))
+      obs = context.actorOf(Props(classOf[YgraphObserver], 0.1), "obs")
+      context.become(setup2(sender, domainRouter,
+          new ResponseTracker[Any, ActorRef](elements.values.toSet)))
     case Subdomain.FindRemoteBoundary(index, messageId) =>
       boundaries.get(index) foreach { _ forward Identify(messageId) }
   }
 
   def setup2(controller: ActorRef, domainRouter: ActorRef,
-      responses: mutable.Map[ActorRef, Boolean]): Receive = {
+      tracker: ResponseTracker[Any, ActorRef]): Receive = {
     case 'GetLocalElements =>
-      // TODO: Subscribe to changes
       sender ! Subdomain.ElementsList(elements.values.toList)
     case GllElement.FindBoundary(index, messageId) =>
       if (boundaries.contains(index)) boundaries(index) forward Identify(messageId)
@@ -53,38 +54,28 @@ class Subdomain(grid: GridDistribution, pde: FluxConservativePde,
     case Subdomain.FindRemoteBoundary(index, messageId) =>
       boundaries.get(index) foreach { _ forward Identify(messageId) }
     case 'Ready =>
-      responses(sender) = true
-      if (responses.forall(_._2)) {
-        elements.values foreach { _ ! GllElement.SetObserver(obs) }
-        context.become(setup3(controller, emptyResponses))
-      }
-  }
-
-  def setup3(controller: ActorRef,
-      responses: mutable.Map[ActorRef, Boolean]): Receive = {
-    case 'Ack =>
-      responses(sender) = true
-      if (responses.forall(_._2)) {
+      tracker.register('Ready, sender)
+      if (tracker.keyCompleted('Ready)) {
         controller ! 'AllReady
-        // TODO: Race condition
-        obs ! 'ElementsReady
-        context.become(ready(controller, emptyResponses))
+        context.become(ready(controller, new ResponseTracker[Any, ActorRef](elements.values.toSet + obs)))
       }
-    case 'GetLocalElements =>
-      // TODO: Subscribe to changes
-      sender ! Subdomain.ElementsList(elements.values.toList)
   }
 
   def ready(controller: ActorRef,
-      responses: mutable.Map[ActorRef, Boolean]): Receive = {
+      tracker: ResponseTracker[Any, ActorRef]): Receive = {
     case 'GetLocalElements =>
-      // TODO: Subscribe to changes
       sender ! Subdomain.ElementsList(elements.values.toList)
     case 'GetStepper =>
       elements.values foreach { _ forward 'GetStepper }
     case 'DoneStepping =>
-      responses(sender) = true
-      if (responses.forall(_._2)) {
+      tracker.register('Done, sender)
+      if (tracker.keyCompleted('Done)) {
+        controller ! 'AllDone
+        context.become(finished)
+      }
+    case 'DoneObserving =>
+      tracker.register('Done, sender)
+      if (tracker.keyCompleted('Done)) {
         controller ! 'AllDone
         context.become(finished)
       }
@@ -95,16 +86,20 @@ class Subdomain(grid: GridDistribution, pde: FluxConservativePde,
       context.system.shutdown()
   }
 
-  def emptyResponses: mutable.Map[ActorRef, Boolean] = {
-    val responses = mutable.Map.empty[ActorRef, Boolean]
-    elements.values foreach { responses(_) = false }
-    responses
-  }
-
   private def createBoundaries(): Unit = {
+    // Periodic BC HACK
+    boundaries(0) = context.actorOf(Props(classOf[InternalBoundaryActor],
+      -1.0), "boundary0")
+
     for ((b, bc) <- grid.myExternalBoundaries(nodeId)) {
-      boundaries(b.index) = context.actorOf(Props(classOf[ExternalBoundaryActor],
-          b.x, bc), s"boundary${b.index}")
+      //boundaries(b.index) = context.actorOf(Props(classOf[ExternalBoundaryActor],
+      //    b.x, bc), s"boundary${b.index}")
+
+      // Periodic BC HACK
+      if (b.index != 0) {
+        boundaries(b.index) = context.actorOf(Props(classOf[Forwarder],
+            boundaries(0)), s"boundary${b.index}")
+      }
     }
     for (b <- grid.myInternalBoundaries(nodeId)) {
       boundaries(b.index) = context.actorOf(Props(classOf[InternalBoundaryActor],
@@ -120,5 +115,11 @@ class Subdomain(grid: GridDistribution, pde: FluxConservativePde,
       elements(e.index) = context.actorOf(Props(classOf[GllElement],
           basis, map, pde), s"interval${e.index}")
     }
+  }
+}
+
+class Forwarder(receiver: ActorRef) extends Actor {
+  def receive = {
+    case msg => receiver forward msg
   }
 }
