@@ -8,7 +8,7 @@ equations.  Inter-node parallelism is achieved using Akka clustering.
 Dependencies
 ------------
 DGenerate is written in Scala and requires an SBT launcher compatible with
-version 0.12.4 and a Java SE 7 JVM.
+version 0.13.0 and a Java SE 7 JVM.
 
 Usage
 -----
