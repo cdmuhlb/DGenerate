@@ -1,4 +1,4 @@
-name := "ScalaSpEC-Harvest"
+name := "DGenerate"
 
 version := "1.0"
 
