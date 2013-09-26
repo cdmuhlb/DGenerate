@@ -16,3 +16,7 @@ Currently, some configuration is specified in `application.conf`, while other
 options are hard-coded in `Main.scala`.  Nodes are started by invoking
 
     sbt run <hostname> <port>
+
+For a single-node run, use `127.0.0.1` for `<hostname>` and `2552` for `<port>`.
+Additionally, the directory `/tmp/harvest` must exist (this restriction will
+obviously be addressed in the future).
