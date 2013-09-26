@@ -11,5 +11,5 @@ Usage:
 
     java ConcatYgraph <nElems> > domain.yg
 
-Choose `nElems` to be the number of elements in your domain.  Output is written
-to standard out.
+Choose `<nElems>` to be the number of elements in your domain.  Output is
+written to standard out.
